@@ -1,39 +1,39 @@
+import asyncio
 import logging
 import os
-from aiogram import Bot, Dispatcher, types
-from aiogram.types import ParseMode
-from aiogram.utils import executor
+
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums.parse_mode import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+
+from handlers import router
+from utils import config
 from dotenv import load_dotenv
 
-# Загружаем токен из .env файла
+# Загружаем переменные из .env
 load_dotenv()
-API_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+async def main():
+    bot = Bot(
+        token=BOT_TOKEN,
+        default=DefaultBotProperties(
+            parse_mode=ParseMode.HTML,
+        )
+    )
+    dp = Dispatcher(storage=MemoryStorage())
+    dp.include_router(router)
+    await bot.delete_webhook(drop_pending_updates=True)
+    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
 
-# Инициализация бота и диспетчера
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher(bot)
 
-# Основные обработчики
+if __name__ == '__main__':
+    logging.basicConfig(
+        level=logging.INFO,
+        #format='%(asctime)s - %(levelname)s - %(message)s',  # Формат лог-сообщения
+        #filename='app.log',  # Файл для записи логов (если нужно)
+        #filemode='w'  # Перезаписать файл при каждом запуске
 
-# Обработчик команды /start
-@dp.message_handler(commands=['start'])
-async def cmd_start(message: types.Message):
-    await message.reply("Привет! Я бот для викторины. Давай играть!")
-
-# Обработчик команды /help
-@dp.message_handler(commands=['help'])
-async def cmd_help(message: types.Message):
-    await message.reply("Я помогу тебе сыграть в викторину. Вопросы появятся после начала игры.")
-
-# Запуск бота
-async def on_start():
-    print("Бот запущен!")
-    await dp.start_polling()
-
-# Функция для запуска бота
-def start_bot():
-    from aiogram import executor
-    executor.start_polling(dp, skip_updates=True)
+    )
+    asyncio.run(main())
