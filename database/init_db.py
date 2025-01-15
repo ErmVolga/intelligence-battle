@@ -20,7 +20,31 @@ def create_table(connection):
             );
         """
         cursor.execute(create_table_query)
+
+        # Создание таблицы вопросов
+        create_questions_table_query = """
+                    CREATE TABLE IF NOT EXISTS questions (
+                        id INT AUTO_INCREMENT PRIMARY KEY,     -- ID вопроса
+                        question TEXT NOT NULL,                 -- Вопрос викторины
+                        correct_answer TEXT NOT NULL,           -- Правильный ответ
+                        wrong_answer_1 TEXT,                    -- Неправильный ответ 1
+                        wrong_answer_2 TEXT,                    -- Неправильный ответ 2
+                        wrong_answer_3 TEXT,                    -- Неправильный ответ 3
+                        wrong_answer_4 TEXT,                    -- Неправильный ответ 4 (опционально)
+                        wrong_answer_5 TEXT,                    -- Неправильный ответ 5 (опционально)
+                        wrong_answer_6 TEXT,                    -- Неправильный ответ 6 (опционально)
+                        wrong_answer_7 TEXT,                    -- Неправильный ответ 7 (опционально)
+                        wrong_answer_8 TEXT,                    -- Неправильный ответ 8 (опционально)
+                        wrong_answer_9 TEXT,                    -- Неправильный ответ 9 (опционально)
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- Время создания вопроса
+                    );
+        """
+
+        cursor.execute(create_questions_table_query)
+
+        # Фиксируем изменения
         connection.commit()
-        logging.info("Таблица 'players' создана успешно")
+        logging.info("Таблицы 'players' и 'questions' созданы успешно")
+
     except Error as e:
         logging.error(f"Ошибка создания таблицы: {e}")

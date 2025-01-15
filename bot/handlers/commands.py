@@ -16,8 +16,6 @@ router = Router()
 @router.message(Command("start"))
 async def start_handler(msg: Message):
     try:
-        logging.info(f"Получена команда /start от пользователя с id {msg.from_user.id}")
-
         # Подключение к базе данных
         try:
             connection = create_connection()
@@ -84,7 +82,66 @@ async def start_handler(msg: Message):
         logging.error(f"Ошибка при обработке команды /start: {e}")
 
 
-@router.message()
+@router.message(F.text == "Моя статистика")
+async def my_stats_handler(msg: types.Message):
+    user_id = msg.from_user.id  # Получаем ID пользователя
+    connection = create_connection()  # Устанавливаем соединение с базой данных
+
+    if connection is not None:
+        try:
+            cursor = connection.cursor()
+
+            # Запрос на получение статистики
+            query = """
+                SELECT score, correct_answers, wrong_answers, wins
+                FROM players
+                WHERE id = %s;
+            """
+            cursor.execute(query, (user_id,))
+            result = cursor.fetchone()
+
+            if result:
+                # Извлекаем данные
+                score, correct_answers, wrong_answers, wins = result
+                total_answers = correct_answers + wrong_answers
+
+                # Вычисляем долю правильных ответов
+                if total_answers > 0:
+                    accuracy = correct_answers / total_answers
+                    accuracy_percentage = round(accuracy * 100, 2)  # Процент с округлением
+                else:
+                    accuracy_percentage = 0.0
+
+                # Формируем и отправляем сообщение
+                await msg.answer(
+                    f"📊 Ваша статистика:\n\n"
+                    f"🏆 Очки: {score}\n"
+                    f"✅ Правильных ответов: {correct_answers}\n"
+                    f"❌ Неправильных ответов: {wrong_answers}\n"
+                    f"📈 Доля правильных ответов: {accuracy_percentage}%\n"
+                    f"🥇 Побед: {wins}"
+                )
+
+                # Логируем успешное выполнение команды
+                logging.info(f"Статистика пользователя {user_id} успешно отправлена.")
+            else:
+                # Если пользователя нет в базе
+                await msg.answer("У вас пока нет статистики. Начните игру, чтобы её создать!")
+                logging.info(f"Пользователь с id {user_id} запрашивал статистику, но не найден в базе.")
+        except Exception as e:
+            # Логируем ошибку
+            logging.error(f"Ошибка при обработке статистики для пользователя {user_id}: {e}")
+            await msg.answer("Произошла ошибка при получении вашей статистики. Попробуйте позже.")
+        finally:
+            connection.close()
+    else:
+        # Логируем ошибку подключения к базе данных
+        logging.error("Ошибка подключения к базе данных.")
+        await msg.answer("Ошибка подключения к базе данных. Попробуйте позже.")
+
+'''
+@router.message(F.text & ~F.text.startswith("/"))
 async def message_handler(msg: Message):
     await msg.answer(f"Твой id: {msg.from_user.id}")
+'''
 
