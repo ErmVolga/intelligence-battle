@@ -5,6 +5,7 @@ from aiogram.filters import Command
 from dotenv import load_dotenv
 
 from bot.keyboards import start_buttons
+from bot.keyboards.game_kb import game_start_keyboard
 from bot.utils.db import create_connection, insert_players
 from bot.utils.logging_config import setup_logging
 
@@ -140,8 +141,14 @@ async def my_stats_handler(msg: types.Message):
         await msg.answer("Ошибка подключения к базе данных. Попробуйте позже.")
 
 @router.message(F.text == "Начать игру")
-async def start_game():
-    pass
+async def start_game(msg: types.Message):
+    try:
+        # Отправляем пользователю инлайн-клавиатуру с выбором действия
+        await msg.answer("Выберите действие:", reply_markup=game_start_keyboard)
+        logging.info(f"Пользователь {msg.from_user.id} начал процесс создания/присоединения к комнате.")
+    except Exception as e:
+        logging.error(f"Ошибка в start_game для пользователя {msg.from_user.id}: {e}")
+        await msg.answer("Произошла ошибка. Попробуйте позже.")
 
 '''
 @router.message(F.text & ~F.text.startswith("/"))
