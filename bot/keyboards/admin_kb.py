@@ -21,8 +21,26 @@ re_question = InlineKeyboardMarkup(
             InlineKeyboardButton(text="Удалить вопрос", callback_data="delete_question"),
         ],
 [
-            InlineKeyboardButton(text="Назад", callback_data="pass"),
-            InlineKeyboardButton(text="Изменить вопрос", callback_data="change_question"),
+            InlineKeyboardButton(text="Назад", callback_data="back_to_admin_panel"),
+            InlineKeyboardButton(text="Изменить вопрос", callback_data="edit_question"),
+        ]
+    ]
+)
+
+# Клавиатура для выбора поля для изменения вопроса
+edit_question_fields_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Вопрос", callback_data="question"),
+            InlineKeyboardButton(text="Правильный ответ", callback_data="correct_answer")
+        ],
+        [
+            InlineKeyboardButton(text="Неправильный ответ 1", callback_data="wrong_answer_1"),
+            InlineKeyboardButton(text="Неправильный ответ 2", callback_data="wrong_answer_2")
+        ],
+        [
+            InlineKeyboardButton(text="Неправильный ответ 3", callback_data="wrong_answer_3"),
+            InlineKeyboardButton(text="Назад", callback_data="back_to_questions")
         ]
     ]
 )
