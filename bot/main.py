@@ -7,7 +7,7 @@ from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
 
-from handlers import commands_router, admin_router
+from handlers import *
 from utils.logging_config import setup_logging
 from utils.db import create_connection
 from database.init_db import create_table
@@ -30,7 +30,8 @@ async def main():
 
     # Включаем все роутеры
     dp.include_router(commands_router)  # роутер команд
-    dp.include_router(admin_router)  # роутер для админ панели
+    dp.include_router(admin_router)     # роутер для админ панели
+    dp.include_router(game_router)      # роутер для игры (комнаты)
 
     connection = create_connection()
     if connection:
