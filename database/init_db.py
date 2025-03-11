@@ -42,9 +42,24 @@ def create_table(connection):
 
         cursor.execute(create_questions_table_query)
 
+        # Создание таблицы комнат
+        create_table_rooms = """
+            CREATE TABLE IF NOT EXISTS rooms (
+                id INT AUTO_INCREMENT PRIMARY KEY,  -- Уникальный идентификатор комнаты
+                player1_id BIGINT DEFAULT NULL,     -- ID первого игрока
+                player2_id BIGINT DEFAULT NULL,     -- ID второго игрока
+                player3_id BIGINT DEFAULT NULL,     -- ID третьего игрока
+                player4_id BIGINT DEFAULT NULL,     -- ID четвертого игрока
+                question_id INT NOT NULL,           -- ID текущего вопроса
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- Время создания комнаты
+            );
+        """
+
+        cursor.execute(create_table_rooms)
+
         # Фиксируем изменения
         connection.commit()
-        logging.info("Таблицы 'players' и 'questions' созданы успешно")
+        logging.info("Таблицы 'players', 'questions', 'rooms' созданы успешно")
 
     except Error as e:
         logging.error(f"Ошибка создания таблицы: {e}")
