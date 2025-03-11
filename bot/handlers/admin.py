@@ -18,15 +18,18 @@ ADMIN_IDS = os.getenv("ADMIN_IDS").split(",")
 
 router = Router()
 
+
 # Состояния для FSM (машины состояний)
 class AddQuestion(StatesGroup):
     question = State()
     correct_answer = State()
     wrong_answers = State()
 
+
 # Состояние для удаления вопроса
 class DeleteQuestion(StatesGroup):
     question_id = State()
+
 
 # Состояния для изменения вопроса
 class EditQuestion(StatesGroup):
@@ -34,8 +37,10 @@ class EditQuestion(StatesGroup):
     field_to_edit = State()  # Шаг 2: Выбор поля для изменения
     new_value = State()  # Шаг 3: Ввод нового значения
 
+
 def is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
+
 
 # Вход в админ-панель
 @router.message(Command("admin", prefix="?"))
@@ -47,12 +52,14 @@ async def admin_handler(msg: types.Message):
             logging.info(f"Пользователь {user_id} запросил админ-панель")
             await msg.answer("Добро пожаловать в админ-панель!", reply_markup=admin_kb.main_admin_keyboard)
         else:
-            logging.warning(f"Пользователь {user_id} попытался получить доступ к админ-панели, но не является администратором.")
+            logging.warning(
+                f"Пользователь {user_id} попытался получить доступ к админ-панели, но не является администратором.")
             await msg.answer("Вы не имеете доступа к админ-панели.")
 
     except Exception as e:
         logging.error(f"Ошибка в admin_handler для пользователя {msg.from_user.id}: {e}")
         await msg.answer("Произошла ошибка. Попробуйте позже.")
+
 
 # Клавиатура для меню управления вопросами
 @router.callback_query()
@@ -100,6 +107,7 @@ async def admin_callback_handler(callback: CallbackQuery, state: FSMContext):
         logging.error(f"Ошибка в admin_callback_handler для пользователя {callback.from_user.id}: {e}")
         await callback.answer("Произошла ошибка. Попробуйте позже.")
 
+
 # Обработчик текстового ввода (шаг 1 — ввод вопроса)
 @router.message(AddQuestion.question)
 async def process_question(msg: types.Message, state: FSMContext):
@@ -112,6 +120,7 @@ async def process_question(msg: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка в process_question для пользователя {msg.from_user.id}: {e}")
         await msg.answer("Произошла ошибка. Попробуйте снова.")
+
 
 # Обработчик текстового ввода (шаг 2 — ввод правильного ответа)
 @router.message(AddQuestion.correct_answer)
@@ -126,6 +135,7 @@ async def process_correct_answer(msg: types.Message, state: FSMContext):
         logging.error(f"Ошибка в process_correct_answer для пользователя {msg.from_user.id}: {e}")
         await msg.answer("Произошла ошибка. Попробуйте снова.")
 
+
 # Обработчик текстового ввода (шаг 3 — ввод неправильных ответов)
 @router.message(AddQuestion.wrong_answers)
 async def process_wrong_answers(msg: types.Message, state: FSMContext):
@@ -133,7 +143,8 @@ async def process_wrong_answers(msg: types.Message, state: FSMContext):
         wrong_answers = [ans.strip() for ans in msg.text.split(",") if ans.strip()]
         if len(wrong_answers) < 3:
             await msg.answer("Ошибка! Нужно минимум 3 неправильных ответа. Попробуйте снова:")
-            logging.warning(f"Пользователь {msg.from_user.id} ввёл недостаточное количество неправильных ответов: {msg.text}")
+            logging.warning(
+                f"Пользователь {msg.from_user.id} ввёл недостаточное количество неправильных ответов: {msg.text}")
             return
 
         # Получаем сохранённые данные
@@ -154,7 +165,8 @@ async def process_wrong_answers(msg: types.Message, state: FSMContext):
             cursor.close()
             connection.close()
             await msg.answer("✅ Вопрос успешно добавлен!")
-            logging.info(f"Пользователь {msg.from_user.id} успешно добавил вопрос: {question} с правильным ответом: {correct_answer} и неправильными ответами: {wrong_answers[:3]}")
+            logging.info(
+                f"Пользователь {msg.from_user.id} успешно добавил вопрос: {question} с правильным ответом: {correct_answer} и неправильными ответами: {wrong_answers[:3]}")
 
             # Возвращаем администратора в меню управления вопросами
             await msg.answer("Что сделать с вопросами?", reply_markup=admin_kb.re_question)
@@ -167,6 +179,7 @@ async def process_wrong_answers(msg: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка в process_wrong_answers для пользователя {msg.from_user.id}: {e}")
         await msg.answer("Произошла ошибка. Попробуйте снова.")
+
 
 # Обработчик для удаления вопроса по ID
 @router.message(DeleteQuestion.question_id)
@@ -205,7 +218,8 @@ async def process_delete_question(msg: types.Message, state: FSMContext):
                 await msg.answer("Что сделать с вопросами?", reply_markup=admin_kb.re_question)
             else:
                 await msg.answer(f"❌ Вопрос с ID {question_id} не найден.")
-                logging.warning(f"Пользователь {msg.from_user.id} попытался удалить несуществующий вопрос с ID {question_id}.")
+                logging.warning(
+                    f"Пользователь {msg.from_user.id} попытался удалить несуществующий вопрос с ID {question_id}.")
         else:
             await msg.answer("❌ Ошибка подключения к базе данных.")
             logging.error(f"Ошибка подключения к базе данных при удалении вопроса пользователем {msg.from_user.id}.")
@@ -215,6 +229,7 @@ async def process_delete_question(msg: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка в process_delete_question для пользователя {msg.from_user.id}: {e}")
         await msg.answer("Произошла ошибка. Попробуйте снова.")
+
 
 # Обработчик для изменения вопроса (шаг 1 — ввод ID вопроса)
 @router.message(EditQuestion.question_id)
@@ -243,6 +258,7 @@ async def process_edit_question_id(msg: types.Message, state: FSMContext):
         logging.error(f"Ошибка в process_edit_question_id для пользователя {msg.from_user.id}: {e}")
         await msg.answer("Произошла ошибка. Попробуйте снова.")
 
+
 # Обработчик для изменения вопроса (шаг 2 — выбор поля для изменения)
 @router.callback_query(EditQuestion.field_to_edit)
 async def process_edit_question_field(callback: CallbackQuery, state: FSMContext):
@@ -262,6 +278,7 @@ async def process_edit_question_field(callback: CallbackQuery, state: FSMContext
     except Exception as e:
         logging.error(f"Ошибка в process_edit_question_field для пользователя {callback.from_user.id}: {e}")
         await callback.answer("Произошла ошибка. Попробуйте позже.")
+
 
 # Обработчик для изменения вопроса (шаг 3 — ввод нового значения)
 @router.message(EditQuestion.new_value)
@@ -287,7 +304,8 @@ async def process_edit_question_value(msg: types.Message, state: FSMContext):
             connection.close()
 
             await msg.answer(f"✅ Поле '{field_to_edit}' вопроса с ID {question_id} успешно изменено!")
-            logging.info(f"Пользователь {msg.from_user.id} успешно изменил поле '{field_to_edit}' вопроса с ID {question_id}.")
+            logging.info(
+                f"Пользователь {msg.from_user.id} успешно изменил поле '{field_to_edit}' вопроса с ID {question_id}.")
 
             # Возвращаем администратора в меню управления вопросами
             await msg.answer("Что сделать с вопросами?", reply_markup=admin_kb.re_question)

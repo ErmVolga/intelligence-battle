@@ -139,6 +139,10 @@ async def my_stats_handler(msg: types.Message):
         logging.error("Ошибка подключения к базе данных.")
         await msg.answer("Ошибка подключения к базе данных. Попробуйте позже.")
 
+@router.message(F.text == "Начать игру")
+async def start_game():
+    pass
+
 '''
 @router.message(F.text & ~F.text.startswith("/"))
 async def message_handler(msg: Message):
