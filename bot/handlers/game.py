@@ -284,7 +284,7 @@ async def update_room_status_periodically(message: Message, room_id: int, stop_e
                     )
                     last_count = current_count
 
-                    max_players_in_room = 4
+                    max_players_in_room = 2
 
                     if current_count >= max_players_in_room:
                         await message.edit_text("🎮 Начинаем игру!")
