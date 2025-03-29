@@ -53,3 +53,11 @@ def get_room_status_keyboard(room_id: int, players_count: int) -> InlineKeyboard
             ]
         ]
     )
+
+back_to_main_inline_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [InlineKeyboardButton(text="Начать игру", callback_data="start_game")],
+        [InlineKeyboardButton(text="Моя статистика", callback_data="my_stats")],
+        [InlineKeyboardButton(text="Правила", callback_data="rules")]
+    ]
+)

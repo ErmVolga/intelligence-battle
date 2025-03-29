@@ -20,7 +20,7 @@ def create_connection():
             password=password,
             database=database_name
         )
-        logging.info("Подключение к базе данных 1 (информация о пользователях) успешно установлено.")
+        #logging.info("Подключение к базе данных 1 (информация о пользователях) успешно установлено.")
         return connection
     except Error as e:
         logging.error(f"Ошибка подключения к базе данных 1: {e}")

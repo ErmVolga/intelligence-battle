@@ -6,71 +6,74 @@ from bot.utils.logging_config import setup_logging
 setup_logging()
 load_dotenv()
 
+
 def create_table(connection):
     try:
         cursor = connection.cursor()
+
+        # Создаем таблицу вопросов (должна быть первой, так как на нее есть ссылки)
+        create_questions_table_query = """
+        CREATE TABLE IF NOT EXISTS questions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            question TEXT NOT NULL,
+            correct_answer TEXT NOT NULL,
+            wrong_answer_1 TEXT,
+            wrong_answer_2 TEXT,
+            wrong_answer_3 TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        cursor.execute(create_questions_table_query)
+
+        # Создаем таблицу комнат
+        create_table_rooms = """
+        CREATE TABLE IF NOT EXISTS rooms (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            player1_id BIGINT DEFAULT NULL,
+            player2_id BIGINT DEFAULT NULL,
+            player3_id BIGINT DEFAULT NULL,
+            player4_id BIGINT DEFAULT NULL,
+            question_id INT NOT NULL,
+            is_private BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+        );
+        """
+        cursor.execute(create_table_rooms)
+
+        # Создаем таблицу игроков
         create_table_query = """
-            CREATE TABLE IF NOT EXISTS players (
-                id BIGINT AUTO_INCREMENT PRIMARY KEY,    -- ID игрока, автоинкремент
-                score INT DEFAULT 0,                   -- Количество очков (начальное значение 0)
-                correct_answers INT DEFAULT 0,         -- Количество правильных ответов (начальное значение 0)
-                wrong_answers INT DEFAULT 0,           -- Количество неправильных ответов (начальное значение 0)
-                wins INT DEFAULT 0,                    -- Количество побед (начальное значение 0)
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- Время создания записи
-            );
+        CREATE TABLE IF NOT EXISTS players (
+            id BIGINT PRIMARY KEY,
+            score INT DEFAULT 0,
+            correct_answers INT DEFAULT 0,
+            wrong_answers INT DEFAULT 0,
+            wins INT DEFAULT 0,
+            current_room_id INT DEFAULT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (current_room_id) REFERENCES rooms(id) ON DELETE SET NULL
+        );
         """
         cursor.execute(create_table_query)
 
-        # Создание таблицы вопросов
-        create_questions_table_query = """
-                    CREATE TABLE IF NOT EXISTS questions (
-                        id INT AUTO_INCREMENT PRIMARY KEY,     -- ID вопроса
-                        question TEXT NOT NULL,                 -- Вопрос викторины
-                        correct_answer TEXT NOT NULL,           -- Правильный ответ
-                        wrong_answer_1 TEXT,                    -- Неправильный ответ 1
-                        wrong_answer_2 TEXT,                    -- Неправильный ответ 2
-                        wrong_answer_3 TEXT,                    -- Неправильный ответ 3
-                        wrong_answer_4 TEXT,                    -- Неправильный ответ 4 (опционально)
-                        wrong_answer_5 TEXT,                    -- Неправильный ответ 5 (опционально)
-                        wrong_answer_6 TEXT,                    -- Неправильный ответ 6 (опционально)
-                        wrong_answer_7 TEXT,                    -- Неправильный ответ 7 (опционально)
-                        wrong_answer_8 TEXT,                    -- Неправильный ответ 8 (опционально)
-                        wrong_answer_9 TEXT,                    -- Неправильный ответ 9 (опционально)
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- Время создания вопроса
-                    );
-        """
-
-        cursor.execute(create_questions_table_query)
-
-        # Создание таблицы комнат
-        create_table_rooms = """
-            CREATE TABLE IF NOT EXISTS rooms (
-                id INT AUTO_INCREMENT PRIMARY KEY,  -- Уникальный идентификатор комнаты
-                player1_id BIGINT DEFAULT NULL,     -- ID первого игрока
-                player2_id BIGINT DEFAULT NULL,     -- ID второго игрока
-                player3_id BIGINT DEFAULT NULL,     -- ID третьего игрока
-                player4_id BIGINT DEFAULT NULL,     -- ID четвертого игрока
-                question_id INT NOT NULL,           -- ID текущего вопроса
-                is_private BOOLEAN DEFAULT FALSE,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- Время создания комнаты
-            );
-        """
-
-        cursor.execute(create_table_rooms)
-
-        create_active_players_table = """
-        CREATE TABLE IF NOT EXISTS active_players (
-            user_id BIGINT PRIMARY KEY,
-            room_id INT NOT NULL,
-            FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
-        );
-        """
-
-        cursor.execute(create_active_players_table)
-
-        # Фиксируем изменения
         connection.commit()
-        logging.info("Таблицы 'players', 'questions', 'rooms' созданы успешно")
+        logging.info("Таблицы 'questions', 'rooms' и 'players' созданы успешно")
+
+        # Добавляем тестовые данные, если таблицы пустые
+        cursor.execute("SELECT COUNT(*) FROM questions")
+        if cursor.fetchone()[0] == 0:
+            test_questions = [
+                ("Столица Франции?", "Париж", "Лондон", "Берлин", "Мадрид"),
+                ("2 + 2?", "4", "5", "3", "22")
+            ]
+            cursor.executemany(
+                "INSERT INTO questions (question, correct_answer, wrong_answer_1, wrong_answer_2, wrong_answer_3) VALUES (%s, %s, %s, %s, %s)",
+                test_questions
+            )
+            connection.commit()
+            logging.info("Добавлены тестовые вопросы")
 
     except Error as e:
-        logging.error(f"Ошибка создания таблицы: {e}")
+        logging.error(f"Ошибка создания таблиц: {e}")
+        connection.rollback()
+        raise
