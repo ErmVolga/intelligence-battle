@@ -6,7 +6,6 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv
-
 from handlers import *
 from utils.logging_config import setup_logging
 from utils.db import create_connection
@@ -14,6 +13,8 @@ from database.init_db import create_table
 
 setup_logging()
 load_dotenv()
+
+
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 

@@ -1,6 +1,6 @@
 from aiogram import types, F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.state import State, StatesGroup, any_state
 from bot.utils.db import create_connection
 from bot.keyboards import game_kb
 import logging
@@ -13,8 +13,34 @@ router = Router()
 class JoinRoom(StatesGroup):
     waiting_for_room_id = State()  # Ожидание ввода ID комнаты
 
-# Обработчик для кнопки "Создать комнату"
-@router.callback_query(F.data == "create_room")
+@router.callback_query(any_state)
+async def game_callback_handler(callback: types.CallbackQuery, state: FSMContext):
+    data = callback.data
+    logging.info(f"Получен колбэк: {data} от {callback.from_user.id}")
+
+    try:
+        if data == "create_room":
+            await create_room(callback)
+
+        elif data == "join_random_room":
+            await join_random_room(callback)
+
+        elif data == "join_room_by_id":
+            await join_room_by_id(callback, state)
+
+        elif data == "back_to_main":
+            await callback.message.edit_text(
+                "Главное меню:",
+                reply_markup=game_kb.start_buttons
+            )
+
+        await callback.answer()
+
+    except Exception as e:
+        logging.error(f"Ошибка в game_callback_handler: {e}")
+        await callback.answer("❌ Произошла ошибка!")
+
+# Обработчик для создания комнаты
 async def create_room(callback: types.CallbackQuery):
     try:
         user_id = callback.from_user.id
@@ -23,35 +49,28 @@ async def create_room(callback: types.CallbackQuery):
         if connection:
             cursor = connection.cursor()
 
-            # Создаем новую комнату
-            create_room_query = """
-                INSERT INTO rooms (player1_id, question_id)
-                VALUES (%s, %s);
-            """
-            # В качестве question_id можно пока использовать 1 (или любой другой ID вопроса)
-            cursor.execute(create_room_query, (user_id, 1))
-            connection.commit()
+            # Получаем случайный вопрос
+            cursor.execute("SELECT id FROM questions ORDER BY RAND() LIMIT 1")
+            question_id = cursor.fetchone()[0]
 
-            # Получаем ID созданной комнаты
+            cursor.execute(
+                "INSERT INTO rooms (player1_id, question_id) VALUES (%s, %s)",
+                (user_id, question_id)
+            )
+            connection.commit()
             room_id = cursor.lastrowid
 
-            cursor.close()
-            connection.close()
+            await callback.message.answer(f"✅ Комната {room_id} создана!")
+            logging.info(f"Пользователь {user_id} создал комнату {room_id}")
 
-            await callback.message.answer(f"✅ Комната создана! ID комнаты: {room_id}")
-            logging.info(f"Пользователь {user_id} создал комнату с ID {room_id}.")
         else:
-            await callback.message.answer("❌ Ошибка подключения к базе данных.")
-            logging.error(f"Ошибка подключения к базе данных при создании комнаты пользователем {user_id}.")
-
-        await callback.answer()  # Закрываем всплывающее уведомление
+            await callback.message.answer("❌ Ошибка БД")
 
     except Exception as e:
-        logging.error(f"Ошибка в create_room для пользователя {callback.from_user.id}: {e}")
-        await callback.message.answer("Произошла ошибка. Попробуйте позже.")
+        logging.error(f"Ошибка в create_room: {e}")
+        await callback.message.answer("❌ Не удалось создать комнату")
 
 # Обработчик для кнопки "Присоединиться к случайной комнате"
-@router.callback_query(F.data == "join_random_room")
 async def join_random_room(callback: types.CallbackQuery):
     try:
         user_id = callback.from_user.id
@@ -102,7 +121,6 @@ async def join_random_room(callback: types.CallbackQuery):
         await callback.message.answer("Произошла ошибка. Попробуйте позже.")
 
 # Обработчик для кнопки "Присоединиться по ID комнаты"
-@router.callback_query(F.data == "join_room_by_id")
 async def join_room_by_id(callback: types.CallbackQuery, state: FSMContext):
     try:
         await callback.message.answer("Введите ID комнаты:")
