@@ -51,11 +51,22 @@ def create_table(connection):
                 player3_id BIGINT DEFAULT NULL,     -- ID третьего игрока
                 player4_id BIGINT DEFAULT NULL,     -- ID четвертого игрока
                 question_id INT NOT NULL,           -- ID текущего вопроса
+                is_private BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  -- Время создания комнаты
             );
         """
 
         cursor.execute(create_table_rooms)
+
+        create_active_players_table = """
+        CREATE TABLE IF NOT EXISTS active_players (
+            user_id BIGINT PRIMARY KEY,
+            room_id INT NOT NULL,
+            FOREIGN KEY (room_id) REFERENCES rooms(id) ON DELETE CASCADE
+        );
+        """
+
+        cursor.execute(create_active_players_table)
 
         # Фиксируем изменения
         connection.commit()

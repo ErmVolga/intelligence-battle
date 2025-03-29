@@ -5,7 +5,7 @@ from aiogram.filters import Command
 from dotenv import load_dotenv
 
 from bot.keyboards import start_buttons
-from bot.keyboards.game_kb import game_start_keyboard
+from bot.keyboards.game_kb import game_type_keyboard
 from bot.utils.db import create_connection, insert_players
 from bot.utils.logging_config import setup_logging
 
@@ -144,7 +144,7 @@ async def my_stats_handler(msg: types.Message):
 async def start_game(msg: types.Message):
     try:
         # Отправляем пользователю инлайн-клавиатуру с выбором действия
-        await msg.answer("Выберите действие:", reply_markup=game_start_keyboard)
+        await msg.answer("Выберите действие:", reply_markup=game_type_keyboard)
         logging.info(f"Пользователь {msg.from_user.id} начал процесс создания/присоединения к комнате.")
     except Exception as e:
         logging.error(f"Ошибка в start_game для пользователя {msg.from_user.id}: {e}")

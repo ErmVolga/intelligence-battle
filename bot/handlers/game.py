@@ -1,180 +1,359 @@
-from aiogram import types, F, Router
+from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup, any_state
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
 from bot.utils.db import create_connection
 from bot.keyboards import game_kb
 import logging
+import asyncio
 from bot.utils.logging_config import setup_logging
+from typing import Optional
 
 setup_logging()
 router = Router()
 
-# Состояния для FSM (машины состояний)
-class JoinRoom(StatesGroup):
-    waiting_for_room_id = State()  # Ожидание ввода ID комнаты
 
-@router.callback_query(any_state)
-async def game_callback_handler(callback: types.CallbackQuery, state: FSMContext):
-    data = callback.data
-    logging.info(f"Получен колбэк: {data} от {callback.from_user.id}")
+class GameStates(StatesGroup):
+    waiting_for_room_id = State()
 
-    try:
-        if data == "create_room":
-            await create_room(callback)
 
-        elif data == "join_random_room":
-            await join_random_room(callback)
-
-        elif data == "join_room_by_id":
-            await join_room_by_id(callback, state)
-
-        elif data == "back_to_main":
-            await callback.message.edit_text(
-                "Главное меню:",
-                reply_markup=game_kb.start_buttons
-            )
-
-        await callback.answer()
-
-    except Exception as e:
-        logging.error(f"Ошибка в game_callback_handler: {e}")
-        await callback.answer("❌ Произошла ошибка!")
-
-# Обработчик для создания комнаты
-async def create_room(callback: types.CallbackQuery):
-    try:
-        user_id = callback.from_user.id
-        connection = create_connection()
-
-        if connection:
+async def is_user_in_room(user_id: int) -> bool:
+    """Проверяет, находится ли пользователь в какой-либо комнате"""
+    connection = create_connection()
+    if connection:
+        try:
             cursor = connection.cursor()
+            cursor.execute("SELECT 1 FROM active_players WHERE user_id = %s", (user_id,))
+            return bool(cursor.fetchone())
+        finally:
+            connection.close()
+    return False
 
-            # Получаем случайный вопрос
+
+async def add_player_to_room(user_id: int, room_id: int) -> bool:
+    """Добавляет игрока в комнату"""
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute(
+                "INSERT INTO active_players (user_id, room_id) VALUES (%s, %s) "
+                "ON DUPLICATE KEY UPDATE room_id = VALUES(room_id)",
+                (user_id, room_id)
+            )
+            connection.commit()
+            return True
+        except Exception as e:
+            logging.error(f"Ошибка добавления игрока: {e}")
+            return False
+        finally:
+            connection.close()
+    return False
+
+
+async def remove_player_from_room(user_id: int) -> bool:
+    """Удаляет игрока из комнаты"""
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("DELETE FROM active_players WHERE user_id = %s", (user_id,))
+            connection.commit()
+            return cursor.rowcount > 0
+        finally:
+            connection.close()
+    return False
+
+
+async def get_room_players_count(room_id: int) -> int:
+    """Возвращает количество игроков в комнате"""
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("SELECT COUNT(*) FROM active_players WHERE room_id = %s", (room_id,))
+            result = cursor.fetchone()
+            return result[0] if result else 0
+        finally:
+            connection.close()
+    return 0
+
+
+async def get_user_room_id(user_id: int) -> Optional[int]:
+    """Возвращает ID комнаты пользователя"""
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("SELECT room_id FROM active_players WHERE user_id = %s", (user_id,))
+            result = cursor.fetchone()
+            return int(result[0]) if result else None
+        except (ValueError, TypeError):
+            return None
+        finally:
+            connection.close()
+    return None
+
+
+async def create_room(user_id: int, is_private: bool) -> int:
+    """Создает новую комнату"""
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
             cursor.execute("SELECT id FROM questions ORDER BY RAND() LIMIT 1")
             question_id = cursor.fetchone()[0]
 
             cursor.execute(
-                "INSERT INTO rooms (player1_id, question_id) VALUES (%s, %s)",
-                (user_id, question_id)
+                "INSERT INTO rooms (player1_id, question_id, is_private) VALUES (%s, %s, %s)",
+                (user_id, question_id, is_private)
             )
             connection.commit()
-            room_id = cursor.lastrowid
+            return int(cursor.lastrowid)
+        finally:
+            connection.close()
+    raise Exception("Не удалось подключиться к базе данных")
 
-            await callback.message.answer(f"✅ Комната {room_id} создана!")
-            logging.info(f"Пользователь {user_id} создал комнату {room_id}")
 
-        else:
-            await callback.message.answer("❌ Ошибка БД")
+async def find_or_create_public_room(user_id: int) -> int:
+    """Находит или создает публичную комнату"""
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
+            cursor.execute("""
+                SELECT id FROM rooms 
+                WHERE is_private = FALSE 
+                AND (player2_id IS NULL OR player3_id IS NULL OR player4_id IS NULL)
+                LIMIT 1
+            """)
+            room = cursor.fetchone()
 
+            if room:
+                return int(room[0])
+            else:
+                return await create_room(user_id, is_private=False)
+        finally:
+            connection.close()
+    raise Exception("Не удалось подключиться к базе данных")
+
+
+async def update_room_status_periodically(message: Message, room_id: int, stop_event: asyncio.Event):
+    """Фоновая задача для автоматического обновления статуса комнаты"""
+    last_count = 0
+
+    while not stop_event.is_set():
+        try:
+            current_count = await get_room_players_count(room_id)
+
+            if current_count != last_count:
+                await message.edit_reply_markup(
+                    reply_markup=game_kb.get_room_status_keyboard(room_id, current_count)
+                )
+                last_count = current_count
+
+                if current_count >= 2:
+                    await message.edit_text("🎮 Начинаем игру!")
+                    stop_event.set()
+                    return
+
+        except Exception as e:
+            logging.error(f"Ошибка автообновления: {e}")
+
+        await asyncio.sleep(1)
+
+
+@router.message(F.text == "Начать игру")
+async def start_game_handler(msg: Message):
+    """Обработчик кнопки 'Начать игру'"""
+    try:
+        if await is_user_in_room(msg.from_user.id):
+            await msg.answer("⚠️ Вы уже находитесь в комнате. Выйдите сначала.")
+            return
+
+        await msg.answer("Выберите тип игры:", reply_markup=game_kb.game_type_keyboard)
     except Exception as e:
-        logging.error(f"Ошибка в create_room: {e}")
-        await callback.message.answer("❌ Не удалось создать комнату")
+        logging.error(f"Ошибка в start_game_handler: {e}")
+        await msg.answer("❌ Произошла ошибка. Попробуйте позже.")
 
-# Обработчик для кнопки "Присоединиться к случайной комнате"
-async def join_random_room(callback: types.CallbackQuery):
+
+@router.callback_query(F.data.in_(["play_with_friends", "play_random"]))
+async def game_type_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик выбора типа игры"""
     try:
         user_id = callback.from_user.id
-        connection = create_connection()
 
-        if connection:
-            cursor = connection.cursor()
+        if await is_user_in_room(user_id):
+            await callback.answer("⚠️ Вы уже в другой комнате!", show_alert=True)
+            return
 
-            # Ищем комнату с свободными местами
-            find_room_query = """
-                SELECT id FROM rooms
-                WHERE player2_id IS NULL OR player3_id IS NULL OR player4_id IS NULL
-                LIMIT 1;
-            """
-            cursor.execute(find_room_query)
-            result = cursor.fetchone()
+        stop_event = asyncio.Event()
+        room_id = None
+        msg = None
 
-            if result:
-                room_id = result[0]
+        try:
+            if callback.data == "play_with_friends":
+                room_id = await create_room(user_id, is_private=True)
+                if not await add_player_to_room(user_id, room_id):
+                    raise Exception("Не удалось добавить игрока в комнату")
 
-                # Обновляем комнату, добавляя пользователя
-                update_room_query = """
-                    UPDATE rooms
-                    SET player2_id = COALESCE(player2_id, %s),
-                        player3_id = COALESCE(player3_id, %s),
-                        player4_id = COALESCE(player4_id, %s)
-                    WHERE id = %s;
-                """
-                cursor.execute(update_room_query, (user_id, user_id, user_id, room_id))
-                connection.commit()
+                msg = await callback.message.answer(
+                    f"🔒 Приватная комната: {room_id}\n"
+                    "Пригласите друзей, отправив им этот ID",
+                    reply_markup=game_kb.get_room_status_keyboard(room_id, 1)
+                )
 
-                await callback.message.answer(f"✅ Вы присоединились к комнате с ID {room_id}!")
-                logging.info(f"Пользователь {user_id} присоединился к комнате с ID {room_id}.")
-            else:
-                await callback.message.answer("❌ Нет доступных комнат. Создайте новую комнату.")
-                logging.info(f"Пользователь {user_id} попытался присоединиться к случайной комнате, но свободных комнат нет.")
+            elif callback.data == "play_random":
+                room_id = await find_or_create_public_room(user_id)
+                if not await add_player_to_room(user_id, room_id):
+                    raise Exception("Не удалось добавить игрока в комнату")
 
-            cursor.close()
-            connection.close()
+                msg = await callback.message.answer(
+                    "🔎 Ищем случайных соперников...",
+                    reply_markup=game_kb.get_room_status_keyboard(room_id, 1)
+                )
+
+            if room_id and msg:
+                try:
+                    task = asyncio.create_task(update_room_status_periodically(msg, room_id, stop_event))
+                    await state.update_data({
+                        'room_id': room_id,
+                        'stop_event': stop_event,
+                        'status_message_id': msg.message_id,
+                        'background_task': task
+                    })
+                except Exception as e:
+                    logging.error(f"Ошибка при запуске автообновления: {e}")
+                    stop_event.set()
+                    await callback.message.answer("⚠️ Произошла ошибка при создании комнаты")
+
+            await callback.answer()
+
+        except Exception as e:
+            logging.error(f"Ошибка создания комнаты: {e}")
+            await callback.message.answer("❌ Не удалось создать комнату")
+            if stop_event:
+                stop_event.set()
+    except Exception as e:
+        logging.error(f"Неожиданная ошибка в game_type_handler: {e}")
+        await callback.answer("❌ Произошла непредвиденная ошибка")
+
+
+@router.callback_query(F.data.startswith("leave_room:"))
+async def leave_room_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик выхода из комнаты"""
+    try:
+        user_id = callback.from_user.id
+        data = await state.get_data()
+
+        if 'background_task' in data:
+            data['stop_event'].set()
+            data['background_task'].cancel()
+
+        success = await remove_player_from_room(user_id)
+        if success:
+            await callback.message.edit_text(
+                "✅ Вы вышли из комнаты",
+                reply_markup=game_kb.back_to_main_keyboard
+            )
         else:
-            await callback.message.answer("❌ Ошибка подключения к базе данных.")
-            logging.error(f"Ошибка подключения к базе данных при присоединении к комнате пользователем {user_id}.")
+            await callback.message.edit_text(
+                "❌ Не удалось выйти из комнаты",
+                reply_markup=game_kb.back_to_main_keyboard
+            )
 
-        await callback.answer()  # Закрываем всплывающее уведомление
+        await state.clear()
+        await callback.answer()
 
     except Exception as e:
-        logging.error(f"Ошибка в join_random_room для пользователя {callback.from_user.id}: {e}")
-        await callback.message.answer("Произошла ошибка. Попробуйте позже.")
+        logging.error(f"Ошибка выхода из комнаты: {e}")
+        await callback.answer("❌ Ошибка при выходе")
 
-# Обработчик для кнопки "Присоединиться по ID комнаты"
-async def join_room_by_id(callback: types.CallbackQuery, state: FSMContext):
+
+@router.callback_query(F.data == "refresh_room_status")
+async def refresh_room_status_handler(callback: CallbackQuery):
+    """Ручное обновление статуса комнаты"""
     try:
-        await callback.message.answer("Введите ID комнаты:")
-        await state.set_state(JoinRoom.waiting_for_room_id)
-        logging.info(f"Пользователь {callback.from_user.id} начал процесс присоединения к комнате по ID.")
-        await callback.answer()  # Закрываем всплывающее уведомление
+        user_id = callback.from_user.id
+        room_id = await get_user_room_id(user_id)
+
+        if room_id:
+            players_count = await get_room_players_count(room_id)
+            await callback.message.edit_reply_markup(
+                reply_markup=game_kb.get_room_status_keyboard(room_id, players_count)
+            )
+            await callback.answer("♻️ Статус обновлен")
+        else:
+            await callback.answer("❌ Вы не в комнате")
     except Exception as e:
-        logging.error(f"Ошибка в join_room_by_id для пользователя {callback.from_user.id}: {e}")
-        await callback.message.answer("Произошла ошибка. Попробуйте позже.")
+        logging.error(f"Ошибка обновления статуса: {e}")
+        await callback.answer("❌ Ошибка обновления")
 
-# Обработчик для ввода ID комнаты
-@router.message(JoinRoom.waiting_for_room_id)
-async def process_room_id(msg: types.Message, state: FSMContext):
+
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main_handler(callback: CallbackQuery, state: FSMContext):
+    """Возврат в главное меню"""
+    await state.clear()
+    await callback.message.edit_text(
+        "Главное меню:",
+        reply_markup=game_kb.start_buttons
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data == "join_room_by_id")
+async def join_room_by_id_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик ввода ID комнаты"""
+    await callback.message.answer("Введите ID комнаты:")
+    await state.set_state(GameStates.waiting_for_room_id)
+    await callback.answer()
+
+
+@router.message(GameStates.waiting_for_room_id)
+async def process_room_id(msg: Message, state: FSMContext):
+    """Обработчик присоединения по ID"""
     try:
-        room_id = msg.text.strip()
         user_id = msg.from_user.id
-        connection = create_connection()
+        room_id = int(msg.text.strip())
 
+        if await is_user_in_room(user_id):
+            await msg.answer("❌ Вы уже в другой комнате!")
+            return
+
+        connection = create_connection()
         if connection:
             cursor = connection.cursor()
+            cursor.execute("SELECT id FROM rooms WHERE id = %s", (room_id,))
+            if cursor.fetchone():
+                await add_player_to_room(user_id, room_id)
 
-            # Проверяем, существует ли комната с таким ID
-            check_room_query = """
-                SELECT id FROM rooms WHERE id = %s;
-            """
-            cursor.execute(check_room_query, (room_id,))
-            result = cursor.fetchone()
+                stop_event = asyncio.Event()
+                msg = await msg.answer(
+                    f"✅ Вы в комнате {room_id}",
+                    reply_markup=game_kb.get_room_status_keyboard(
+                        room_id,
+                        await get_room_players_count(room_id)
+                    )
+                )
 
-            if result:
-                # Обновляем комнату, добавляя пользователя
-                update_room_query = """
-                    UPDATE rooms
-                    SET player2_id = COALESCE(player2_id, %s),
-                        player3_id = COALESCE(player3_id, %s),
-                        player4_id = COALESCE(player4_id, %s)
-                    WHERE id = %s;
-                """
-                cursor.execute(update_room_query, (user_id, user_id, user_id, room_id))
-                connection.commit()
-
-                await msg.answer(f"✅ Вы присоединились к комнате с ID {room_id}!")
-                logging.info(f"Пользователь {user_id} присоединился к комнате с ID {room_id}.")
+                try:
+                    task = asyncio.create_task(update_room_status_periodically(msg, room_id, stop_event))
+                    await state.update_data({
+                        'room_id': room_id,
+                        'stop_event': stop_event,
+                        'status_message_id': msg.message_id,
+                        'background_task': task
+                    })
+                except Exception as e:
+                    logging.error(f"Ошибка запуска автообновления: {e}")
+                    stop_event.set()
             else:
-                await msg.answer("❌ Комната с таким ID не найдена.")
-                logging.info(f"Пользователь {user_id} попытался присоединиться к несуществующей комнате с ID {room_id}.")
-
-            cursor.close()
+                await msg.answer("❌ Комната не найдена")
             connection.close()
-        else:
-            await msg.answer("❌ Ошибка подключения к базе данных.")
-            logging.error(f"Ошибка подключения к базе данных при присоединении к комнате пользователем {user_id}.")
-
-        await state.clear()  # Очищаем состояние
-
+    except ValueError:
+        await msg.answer("❌ Введите числовой ID комнаты")
     except Exception as e:
-        logging.error(f"Ошибка в process_room_id для пользователя {msg.from_user.id}: {e}")
-        await msg.answer("Произошла ошибка. Попробуйте позже.")
+        logging.error(f"Ошибка присоединения к комнате: {e}")
+        await msg.answer("❌ Ошибка присоединения")
+    finally:
+        await state.clear()
