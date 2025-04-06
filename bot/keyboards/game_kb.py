@@ -61,3 +61,33 @@ back_to_main_inline_keyboard = InlineKeyboardMarkup(
         [InlineKeyboardButton(text="Правила", callback_data="rules")]
     ]
 )
+
+# Клавиатура для выбора действия с друзьями
+friends_action_keyboard = InlineKeyboardMarkup(
+    inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Создать комнату", callback_data="create_room"),
+            InlineKeyboardButton(text="Присоединиться по ID", callback_data="join_room_by_id")
+        ],
+        [InlineKeyboardButton(text="Назад", callback_data="back_to_main")]
+    ]
+)
+
+# Обновленная клавиатура статуса комнаты с таймером
+def get_room_status_keyboard(room_id: int, players_count: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"🔄 Игроков: {players_count}/4",
+                    callback_data="refresh_room_status"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚪 Выйти",
+                    callback_data=f"leave_room:{room_id}"
+                )
+            ]
+        ]
+    )
