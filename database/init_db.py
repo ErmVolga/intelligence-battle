@@ -35,8 +35,8 @@ def create_table(connection):
             player4_id BIGINT DEFAULT NULL,
             question_id INT NOT NULL,
             is_private BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  # Уже есть
+            start_timer_time TIMESTAMP DEFAULT NULL  # Добавляем новое поле
         );
         """
         cursor.execute(create_table_rooms)
