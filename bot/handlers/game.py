@@ -16,6 +16,7 @@ router = Router()
 
 class GameStates(StatesGroup):
     waiting_for_room_id = State()
+    waiting_for_friends_action = State()
 
 
 @router.callback_query(F.data == "back_to_main")
@@ -163,6 +164,21 @@ async def get_room_players_count(room_id: int) -> int:
             connection.close()
     return 0
 
+# Новая функция для автоматического старта игры
+async def start_game_automatically(room_id: int):
+    """Запускает игру автоматически и уведомляет игроков"""
+    try:
+        connection = create_connection()
+        if connection:
+            players = await get_room_players(room_id)
+            for player_id in players:
+                # Отправляем сообщение каждому игроку
+                # Здесь должна быть логика начала игры (ваш код)
+                pass
+            logging.info(f"Игра в комнате {room_id} начата автоматически")
+    except Exception as e:
+        logging.error(f"Ошибка при автоматическом старте игры: {e}")
+
 
 async def get_user_room_id(user_id: int) -> Optional[int]:
     """Возвращает ID комнаты пользователя"""
@@ -268,38 +284,45 @@ async def find_or_create_public_room(user_id: int) -> int:
             connection.close()
     raise Exception("Не удалось подключиться к базе данных")
 
-
+# Модифицированная фоновая задача с таймерами
 async def update_room_status_periodically(message: Message, room_id: int, stop_event: asyncio.Event):
-    """Фоновая задача для обновления статуса комнаты без логирования"""
-    last_count = 0
+    start_time = asyncio.get_event_loop().time()  # Время создания комнаты
+    min_players_timer_started = False  # Флаг для 90-секундного таймера
+    min_players_start_time = None  # Время старта 90-секундного таймера
 
     while not stop_event.is_set():
+        current_time = asyncio.get_event_loop().time()
+        players_count = await get_room_players_count(room_id)
+
+        # Таймер 60 секунд с момента создания комнаты (даже если игроков < 2)
+        if current_time - start_time > 60 and players_count < 2:
+            await message.edit_text("⌛ Время ожидания истекло. Игра начинается!")
+            await start_game_automatically(room_id)
+            stop_event.set()
+            break
+
+        # Таймер 90 секунд после набора 2 игроков
+        if players_count >= 2:
+            if not min_players_timer_started:
+                min_players_start_time = current_time
+                min_players_timer_started = True
+                await message.edit_text("✅ Набрано 2 игрока! Ожидаем до 90 секунд...")
+
+            if current_time - min_players_start_time > 90:
+                await message.edit_text("⌛ Время ожидания истекло. Игра начинается!")
+                await start_game_automatically(room_id)
+                stop_event.set()
+                break
+
+        # Обновляем клавиатуру каждую секунду
         try:
-            current_count = await get_room_players_count(room_id)
+            await message.edit_reply_markup(
+                reply_markup=game_kb.get_room_status_keyboard(room_id, players_count)
+            )
+        except:
+            pass  # Игнорируем ошибки редактирования сообщения
 
-            if current_count != last_count:
-                try:
-                    await message.edit_reply_markup(
-                        reply_markup=game_kb.get_room_status_keyboard(room_id, current_count)
-                    )
-                    last_count = current_count
-
-                    max_players_in_room = 2
-
-                    if current_count >= max_players_in_room:
-                        await message.edit_text("🎮 Начинаем игру!")
-                        stop_event.set()
-                        return
-
-                except Exception:
-                    # Полностью игнорируем все ошибки при обновлении кнопки
-                    pass
-
-            await asyncio.sleep(1)
-
-        except Exception:
-            # Игнорируем все ошибки в фоновой задаче
-            pass
+        await asyncio.sleep(1)
 
 
 @router.message(F.text == "Начать игру")
@@ -316,66 +339,60 @@ async def start_game_handler(msg: Message):
         await msg.answer("❌ Произошла ошибка. Попробуйте позже.")
 
 
-@router.callback_query(F.data.in_(["play_with_friends", "play_random"]))
-async def game_type_handler(callback: CallbackQuery, state: FSMContext):
-    """Обработчик выбора типа игры"""
+@router.callback_query(F.data == "play_with_friends")
+async def play_with_friends_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик кнопки 'Играть с друзьями'"""
+    try:
+        await callback.message.answer(
+            "Выберите действие:",
+            reply_markup=game_kb.friends_action_keyboard
+        )
+        await state.set_state(GameStates.waiting_for_friends_action)
+        await callback.answer()
+    except Exception as e:
+        logging.error(f"Ошибка в play_with_friends_handler: {e}")
+
+
+@router.callback_query(
+    GameStates.waiting_for_friends_action,
+    F.data.in_(["create_room", "join_room_by_id"])
+)
+async def handle_friends_action(callback: CallbackQuery, state: FSMContext):
     try:
         user_id = callback.from_user.id
 
-        if await is_user_in_room(user_id):
-            await callback.answer("⚠️ Вы уже в другой комнате!", show_alert=True)
-            return
+        if callback.data == "create_room":
+            # Создаем комнату
+            room_id = await create_room(user_id, is_private=True)
+            if not await add_player_to_room(user_id, room_id):
+                raise Exception("Не удалось добавить игрока в комнату")
 
-        stop_event = asyncio.Event()
-        room_id = None
-        msg = None
+            msg = await callback.message.answer(
+                f"🔒 Приватная комната: {room_id}\n"
+                "Пригласите друзей, отправив им этот ID",
+                reply_markup=game_kb.get_room_status_keyboard(room_id, 1)
+            )
 
-        try:
-            if callback.data == "play_with_friends":
-                room_id = await create_room(user_id, is_private=True)
-                if not await add_player_to_room(user_id, room_id):
-                    raise Exception("Не удалось добавить игрока в комнату")
+            # Запускаем фоновую задачу с таймерами
+            stop_event = asyncio.Event()
+            task = asyncio.create_task(update_room_status_periodically(msg, room_id, stop_event))
 
-                msg = await callback.message.answer(
-                    f"🔒 Приватная комната: {room_id}\n"
-                    "Пригласите друзей, отправив им этот ID",
-                    reply_markup=game_kb.get_room_status_keyboard(room_id, 1)
-                )
+            await state.update_data({
+                'room_id': room_id,
+                'stop_event': stop_event,
+                'status_message_id': msg.message_id,
+                'background_task': task
+            })
 
-            elif callback.data == "play_random":
-                room_id = await find_or_create_public_room(user_id)
-                if not await add_player_to_room(user_id, room_id):
-                    raise Exception("Не удалось добавить игрока в комнату")
+        else:
+            await callback.message.answer("Введите ID комнаты:")
+            await state.set_state(GameStates.waiting_for_room_id)
 
-                msg = await callback.message.answer(
-                    "🔎 Ищем случайных соперников...",
-                    reply_markup=game_kb.get_room_status_keyboard(room_id, 1)
-                )
+        await callback.answer()
 
-            if room_id and msg:
-                try:
-                    task = asyncio.create_task(update_room_status_periodically(msg, room_id, stop_event))
-                    await state.update_data({
-                        'room_id': room_id,
-                        'stop_event': stop_event,
-                        'status_message_id': msg.message_id,
-                        'background_task': task
-                    })
-                except Exception as e:
-                    logging.error(f"Ошибка при запуске автообновления: {e}")
-                    stop_event.set()
-                    await callback.message.answer("⚠️ Произошла ошибка при создании комнаты")
-
-            await callback.answer()
-
-        except Exception as e:
-            logging.error(f"Ошибка создания комнаты: {e}")
-            await callback.message.answer("❌ Не удалось создать комнату")
-            if stop_event:
-                stop_event.set()
     except Exception as e:
-        logging.error(f"Неожиданная ошибка в game_type_handler: {e}")
-        await callback.answer("❌ Произошла непредвиденная ошибка")
+        logging.error(f"Ошибка в handle_friends_action: {e}")
+        await callback.answer("❌ Не удалось создать комнату")
 
 
 @router.callback_query(F.data.startswith("leave_room:"))
