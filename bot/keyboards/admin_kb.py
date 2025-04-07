@@ -4,14 +4,10 @@ main_admin_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
         [
             InlineKeyboardButton(text="Редактор вопросов", callback_data="re_question"),
-            InlineKeyboardButton(text="Действие 2", callback_data="button_2")
+            InlineKeyboardButton(text="Статистика", callback_data="stats")
         ],
         [
-            InlineKeyboardButton(text="Действие 3", callback_data="button_3"),
-            InlineKeyboardButton(text="Действие 4", callback_data="button_4")
-        ],
-        [  # Новая кнопка выхода
-            InlineKeyboardButton(text="❌ Выход", callback_data="exit_admin")
+            InlineKeyboardButton(text="❌ Выход", callback_data="exit_admin")  # Кнопка должна быть в отдельном ряду
         ]
     ]
 )

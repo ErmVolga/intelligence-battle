@@ -349,19 +349,20 @@ async def process_wrong_answers(msg: types.Message, state: FSMContext):
 @router.callback_query(F.data == "exit_admin")
 async def exit_admin_handler(callback: CallbackQuery, state: FSMContext):
     try:
-        # Удаляем сообщение с админ-панелью
-        await callback.message.delete()
-
-        # Отправляем новое сообщение с главным меню
-        await callback.message.answer(
-            "🔙 Вы вернулись в главное меню",
-            reply_markup=start_buttons  # Используем основную клавиатуру
-        )
-
         # Очищаем состояние
         await state.clear()
+
+        # Удаляем inline-клавиатуру админ-панели
+        await callback.message.edit_reply_markup(reply_markup=None)
+
+        # Отправляем сообщение с главным меню
+        await callback.message.answer(
+            "🔙 Вы вышли из админ-панели",
+            reply_markup=start_buttons
+        )
+
         await callback.answer()
 
     except Exception as e:
-        logging.error(f"Ошибка в exit_admin_handler: {e}")
-        await callback.answer("❌ Не удалось выйти из админ-панели")
+        logging.error(f"Ошибка выхода из админ-панели: {e}")
+        await callback.answer("❌ Не удалось выйти")
