@@ -30,10 +30,10 @@ def drop_table(connection):
     try:
         cursor = connection.cursor()
         # Удаляем таблицу players
-        drop_table_query = "DROP TABLE IF EXISTS players;"
+        drop_table_query = "DROP TABLE IF EXISTS questions;"
         cursor.execute(drop_table_query)
         connection.commit()
-        logging.info("Таблица 'players' удалена успешно.")
+        logging.info("Таблица 'questions' удалена успешно.")
     except Error as e:
         logging.error(f"Ошибка удаления таблицы: {e}")
 

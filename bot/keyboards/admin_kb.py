@@ -35,11 +35,21 @@ edit_question_fields_keyboard = InlineKeyboardMarkup(
             InlineKeyboardButton(text="Правильный ответ", callback_data="correct_answer")
         ],
         [
-            InlineKeyboardButton(text="Неправильный ответ 1", callback_data="wrong_answer_1"),
-            InlineKeyboardButton(text="Неправильный ответ 2", callback_data="wrong_answer_2")
+            InlineKeyboardButton(text="Непр. 1", callback_data="wrong_answer_1"),
+            InlineKeyboardButton(text="Непр. 2", callback_data="wrong_answer_2"),
+            InlineKeyboardButton(text="Непр. 3", callback_data="wrong_answer_3")
         ],
         [
-            InlineKeyboardButton(text="Неправильный ответ 3", callback_data="wrong_answer_3"),
+            InlineKeyboardButton(text="Непр. 4", callback_data="wrong_answer_4"),
+            InlineKeyboardButton(text="Непр. 5", callback_data="wrong_answer_5"),
+            InlineKeyboardButton(text="Непр. 6", callback_data="wrong_answer_6")
+        ],
+        [
+            InlineKeyboardButton(text="Непр. 7", callback_data="wrong_answer_7"),
+            InlineKeyboardButton(text="Непр. 8", callback_data="wrong_answer_8"),
+            InlineKeyboardButton(text="Непр. 9", callback_data="wrong_answer_9")
+        ],
+        [
             InlineKeyboardButton(text="Назад", callback_data="back_to_questions")
         ]
     ]

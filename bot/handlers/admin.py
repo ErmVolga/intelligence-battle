@@ -275,14 +275,9 @@ async def process_question_text(msg: types.Message, state: FSMContext):
 # Обработчик для получения правильного ответа
 @router.message(AddQuestion.correct_answer)
 async def process_correct_answer(msg: types.Message, state: FSMContext):
-    try:
-        await state.update_data(correct_answer=msg.text)
-        await msg.answer("Введите три неправильных ответа через запятую (например: Вариант 1, Вариант 2, Вариант 3):")
-        await state.set_state(AddQuestion.wrong_answers)
-    except Exception as e:
-        logging.error(f"Ошибка при получении правильного ответа: {e}")
-        await msg.answer("❌ Ошибка. Попробуйте снова.")
-        await state.clear()
+    await state.update_data(correct_answer=msg.text)
+    await msg.answer("Введите до 9 неправильных ответов через запятую:\nПример: Вариант 1, Вариант 2, ...")
+    await state.set_state(AddQuestion.wrong_answers)
 
 
 # Обработчик для получения неправильных ответов
@@ -291,40 +286,58 @@ async def process_wrong_answers(msg: types.Message, state: FSMContext):
     try:
         wrong_answers = [ans.strip() for ans in msg.text.split(",") if ans.strip()]
 
-        # Проверяем минимальное количество ответов
-        if len(wrong_answers) < 1:
-            await msg.answer("❌ Нужно хотя бы 1 неправильный ответ. Попробуйте снова.")
-            return
-
-        # Берем первые 3 ответа (если их больше)
-        wrong_answers = wrong_answers[:3]
-
-        # Дополняем до 3 элементов пустыми строками (если нужно)
-        wrong_answers += [""] * (3 - len(wrong_answers))
+        # Берём первые 9 ответов и заменяем пустые строки на None
+        wrong_answers = wrong_answers[:9] + [None] * (9 - len(wrong_answers))
 
         data = await state.get_data()
         connection = create_connection()
         if connection:
-            cursor = connection.cursor()
-            cursor.execute(
-                "INSERT INTO questions (question, correct_answer, wrong_answer_1, wrong_answer_2, wrong_answer_3) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (
-                    data["question"],
-                    data["correct_answer"],
-                    wrong_answers[0],
-                    wrong_answers[1],
-                    wrong_answers[2]
+            cursor = None
+            try:
+                cursor = connection.cursor()
+                cursor.execute(
+                    "INSERT INTO questions (question, correct_answer, "
+                    "wrong_answer_1, wrong_answer_2, wrong_answer_3, "
+                    "wrong_answer_4, wrong_answer_5, wrong_answer_6, "
+                    "wrong_answer_7, wrong_answer_8, wrong_answer_9) "
+                    "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                    (
+                        data["question"],
+                        data["correct_answer"],
+                        *wrong_answers
+                    )
                 )
-            )
-            connection.commit()
-            await msg.answer("✅ Вопрос добавлен!")
+                connection.commit()
+
+                # После успешного добавления показываем меню управления вопросами
+                await msg.answer(
+                    "✅ Вопрос добавлен!",
+                    reply_markup=admin_kb.re_question  # <-- Клавиатура управления вопросами
+                )
+
+            except Exception as e:
+                logging.error(f"Ошибка выполнения SQL-запроса: {e}")
+                await msg.answer(
+                    "❌ Ошибка при работе с базой данных.",
+                    reply_markup=admin_kb.re_question  # <-- Возврат даже при ошибке
+                )
+                connection.rollback()
+            finally:
+                if cursor:
+                    cursor.close()
+                connection.close()
         else:
-            await msg.answer("❌ Ошибка подключения к БД.")
+            await msg.answer(
+                "❌ Ошибка подключения к БД.",
+                reply_markup=admin_kb.re_question  # <-- Возврат при ошибке подключения
+            )
 
         await state.clear()
 
     except Exception as e:
-        logging.error(f"Ошибка добавления вопроса: {e}")
-        await msg.answer("❌ Ошибка. Попробуйте снова.")
+        logging.error(f"Общая ошибка обработки ответов: {e}")
+        await msg.answer(
+            "❌ Произошла непредвиденная ошибка. Попробуйте снова.",
+            reply_markup=admin_kb.re_question  # <-- Возврат при общей ошибке
+        )
         await state.clear()
