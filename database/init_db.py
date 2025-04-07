@@ -20,6 +20,12 @@ def create_table(connection):
             wrong_answer_1 TEXT,
             wrong_answer_2 TEXT,
             wrong_answer_3 TEXT,
+            wrong_answer_4 TEXT,
+            wrong_answer_5 TEXT,
+            wrong_answer_6 TEXT,
+            wrong_answer_7 TEXT,
+            wrong_answer_8 TEXT,
+            wrong_answer_9 TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
         """

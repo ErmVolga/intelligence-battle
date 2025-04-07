@@ -13,16 +13,16 @@ main_admin_keyboard = InlineKeyboardMarkup(
         ],
     ]
 )
-
+# В клавиатуру re_question добавьте кнопку "Отмена"
 re_question = InlineKeyboardMarkup(
-    inline_keyboard = [
+    inline_keyboard=[
         [
             InlineKeyboardButton(text="Добавить вопрос", callback_data="add_question"),
             InlineKeyboardButton(text="Удалить вопрос", callback_data="delete_question"),
         ],
-[
-            InlineKeyboardButton(text="Назад", callback_data="back_to_admin_panel"),
+        [
             InlineKeyboardButton(text="Изменить вопрос", callback_data="edit_question"),
+            InlineKeyboardButton(text="Отмена", callback_data="back_to_admin_panel")
         ]
     ]
 )

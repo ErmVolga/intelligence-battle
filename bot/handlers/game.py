@@ -43,6 +43,7 @@ async def back_to_main_handler(callback: CallbackQuery, state: FSMContext):
         logging.error(f"Ошибка в back_to_main_handler: {e}")
         await callback.answer("❌ Произошла ошибка")
 
+
 async def is_user_in_room(user_id: int) -> bool:
     """Проверяет, находится ли пользователь в какой-либо комнате"""
     connection = create_connection()
@@ -164,6 +165,7 @@ async def get_room_players_count(room_id: int) -> int:
             connection.close()
     return 0
 
+
 # Новая функция для автоматического старта игры
 async def start_game_automatically(room_id: int):
     """Запускает игру автоматически и уведомляет игроков"""
@@ -283,6 +285,7 @@ async def find_or_create_public_room(user_id: int) -> int:
         finally:
             connection.close()
     raise Exception("Не удалось подключиться к базе данных")
+
 
 # Модифицированная фоновая задача с таймерами
 async def update_room_status_periodically(message: Message, room_id: int, stop_event: asyncio.Event):
@@ -473,6 +476,44 @@ async def join_room_by_id_handler(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("Введите ID комнаты:")
     await state.set_state(GameStates.waiting_for_room_id)
     await callback.answer()
+
+
+@router.callback_query(F.data == "play_random")
+async def play_random_handler(callback: CallbackQuery, state: FSMContext):
+    """Обработчик кнопки 'Случайные соперники'"""
+    try:
+        user_id = callback.from_user.id
+
+        if await is_user_in_room(user_id):
+            await callback.answer("⚠️ Вы уже в другой комнате!", show_alert=True)
+            return
+
+        # Создаем или находим публичную комнату
+        room_id = await find_or_create_public_room(user_id)
+        if not await add_player_to_room(user_id, room_id):
+            raise Exception("Не удалось добавить игрока в комнату")
+
+        msg = await callback.message.answer(
+            "🔎 Ищем случайных соперников...",
+            reply_markup=game_kb.get_room_status_keyboard(room_id, 1)
+        )
+
+        # Запускаем фоновую задачу с таймерами
+        stop_event = asyncio.Event()
+        task = asyncio.create_task(update_room_status_periodically(msg, room_id, stop_event))
+
+        await state.update_data({
+            'room_id': room_id,
+            'stop_event': stop_event,
+            'status_message_id': msg.message_id,
+            'background_task': task
+        })
+
+        await callback.answer()
+
+    except Exception as e:
+        logging.error(f"Ошибка в play_random_handler: {e}")
+        await callback.answer("❌ Не удалось найти игру")
 
 
 @router.message(GameStates.waiting_for_room_id)

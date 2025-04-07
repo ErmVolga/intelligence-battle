@@ -18,22 +18,27 @@ ADMIN_IDS = os.getenv("ADMIN_IDS").split(",")
 
 router = Router()
 
+
 # Состояния для FSM
 class AddQuestion(StatesGroup):
     question = State()
     correct_answer = State()
     wrong_answers = State()
 
+
 class DeleteQuestion(StatesGroup):
     question_id = State()
+
 
 class EditQuestion(StatesGroup):
     question_id = State()
     field_to_edit = State()
     new_value = State()
 
+
 def is_admin(user_id: int) -> bool:
     return str(user_id) in ADMIN_IDS
+
 
 # Список всех админских callback_data
 ADMIN_CALLBACKS = [
@@ -41,6 +46,7 @@ ADMIN_CALLBACKS = [
     "back_to_admin_panel", "back_to_questions", "question", "correct_answer",
     "wrong_answer_1", "wrong_answer_2", "wrong_answer_3"
 ]
+
 
 # Вход в админ-панель
 @router.message(Command("admin", prefix="?"))
@@ -51,7 +57,7 @@ async def admin_handler(msg: types.Message):
         if is_admin(user_id):
             logging.info(f"Пользователь {user_id} запросил админ-панель")
             await msg.answer("Добро пожаловать в админ-панель!",
-                           reply_markup=admin_kb.main_admin_keyboard)
+                             reply_markup=admin_kb.main_admin_keyboard)
         else:
             logging.warning(f"Пользователь {user_id} попытался получить доступ к админ-панели")
             await msg.answer("Вы не имеете доступа к админ-панели.")
@@ -59,6 +65,7 @@ async def admin_handler(msg: types.Message):
     except Exception as e:
         logging.error(f"Ошибка в admin_handler: {e}")
         await msg.answer("Произошла ошибка. Попробуйте позже.")
+
 
 # Обработчик колбэков админ-панели
 @router.callback_query(F.data.in_(ADMIN_CALLBACKS))
@@ -112,7 +119,6 @@ async def admin_callback_handler(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка в admin_callback_handler: {e}")
         await callback.answer("❌ Произошла ошибка!")
-
 
 
 # Обработчик для удаления вопроса по ID
@@ -252,3 +258,73 @@ async def process_edit_question_value(msg: types.Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка в process_edit_question_value для пользователя {msg.from_user.id}: {e}")
         await msg.answer("Произошла ошибка. Попробуйте снова.")
+
+# Обработчик для получения текста вопроса (шаг 1)
+@router.message(AddQuestion.question)
+async def process_question_text(msg: types.Message, state: FSMContext):
+    try:
+        await state.update_data(question=msg.text)  # Сохраняем вопрос
+        await msg.answer("Теперь введите правильный ответ:")
+        await state.set_state(AddQuestion.correct_answer)  # Переходим к следующему шагу
+    except Exception as e:
+        logging.error(f"Ошибка при получении вопроса: {e}")
+        await msg.answer("❌ Ошибка. Попробуйте снова.")
+        await state.clear()
+
+
+# Обработчик для получения правильного ответа
+@router.message(AddQuestion.correct_answer)
+async def process_correct_answer(msg: types.Message, state: FSMContext):
+    try:
+        await state.update_data(correct_answer=msg.text)
+        await msg.answer("Введите три неправильных ответа через запятую (например: Вариант 1, Вариант 2, Вариант 3):")
+        await state.set_state(AddQuestion.wrong_answers)
+    except Exception as e:
+        logging.error(f"Ошибка при получении правильного ответа: {e}")
+        await msg.answer("❌ Ошибка. Попробуйте снова.")
+        await state.clear()
+
+
+# Обработчик для получения неправильных ответов
+@router.message(AddQuestion.wrong_answers)
+async def process_wrong_answers(msg: types.Message, state: FSMContext):
+    try:
+        wrong_answers = [ans.strip() for ans in msg.text.split(",") if ans.strip()]
+
+        # Проверяем минимальное количество ответов
+        if len(wrong_answers) < 1:
+            await msg.answer("❌ Нужно хотя бы 1 неправильный ответ. Попробуйте снова.")
+            return
+
+        # Берем первые 3 ответа (если их больше)
+        wrong_answers = wrong_answers[:3]
+
+        # Дополняем до 3 элементов пустыми строками (если нужно)
+        wrong_answers += [""] * (3 - len(wrong_answers))
+
+        data = await state.get_data()
+        connection = create_connection()
+        if connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                "INSERT INTO questions (question, correct_answer, wrong_answer_1, wrong_answer_2, wrong_answer_3) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (
+                    data["question"],
+                    data["correct_answer"],
+                    wrong_answers[0],
+                    wrong_answers[1],
+                    wrong_answers[2]
+                )
+            )
+            connection.commit()
+            await msg.answer("✅ Вопрос добавлен!")
+        else:
+            await msg.answer("❌ Ошибка подключения к БД.")
+
+        await state.clear()
+
+    except Exception as e:
+        logging.error(f"Ошибка добавления вопроса: {e}")
+        await msg.answer("❌ Ошибка. Попробуйте снова.")
+        await state.clear()
