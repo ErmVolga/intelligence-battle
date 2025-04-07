@@ -1,8 +1,7 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-
 main_admin_keyboard = InlineKeyboardMarkup(
-    inline_keyboard = [
+    inline_keyboard=[
         [
             InlineKeyboardButton(text="Редактор вопросов", callback_data="re_question"),
             InlineKeyboardButton(text="Действие 2", callback_data="button_2")
@@ -11,6 +10,9 @@ main_admin_keyboard = InlineKeyboardMarkup(
             InlineKeyboardButton(text="Действие 3", callback_data="button_3"),
             InlineKeyboardButton(text="Действие 4", callback_data="button_4")
         ],
+        [  # Новая кнопка выхода
+            InlineKeyboardButton(text="❌ Выход", callback_data="exit_admin")
+        ]
     ]
 )
 # В клавиатуру re_question добавьте кнопку "Отмена"

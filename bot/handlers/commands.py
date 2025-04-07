@@ -127,6 +127,14 @@ async def start_game(msg: types.Message):
         await msg.answer("Произошла ошибка. Попробуйте позже.")
 
 
+@router.message(F.text == "В главное меню")
+async def back_to_main_handler(msg: Message):
+    await msg.answer(
+        "Главное меню:",
+        reply_markup=start_buttons
+    )
+
+
 '''
 @router.message(F.text & ~F.text.startswith("/"))
 async def message_handler(msg: Message):

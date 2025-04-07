@@ -8,6 +8,7 @@ from aiogram.types import CallbackQuery
 from dotenv import load_dotenv
 from bot.utils.db import create_connection
 from bot.keyboards import admin_kb
+from bot.keyboards.game_kb import start_buttons
 from bot.utils.logging_config import setup_logging
 
 # Настройка логгирования и переменных окружения
@@ -44,7 +45,7 @@ def is_admin(user_id: int) -> bool:
 ADMIN_CALLBACKS = [
     "re_question", "add_question", "delete_question", "edit_question",
     "back_to_admin_panel", "back_to_questions", "question", "correct_answer",
-    "wrong_answer_1", "wrong_answer_2", "wrong_answer_3"
+    "wrong_answer_1", "wrong_answer_2", "wrong_answer_3", "exit_admin"  # Добавлено
 ]
 
 
@@ -259,6 +260,7 @@ async def process_edit_question_value(msg: types.Message, state: FSMContext):
         logging.error(f"Ошибка в process_edit_question_value для пользователя {msg.from_user.id}: {e}")
         await msg.answer("Произошла ошибка. Попробуйте снова.")
 
+
 # Обработчик для получения текста вопроса (шаг 1)
 @router.message(AddQuestion.question)
 async def process_question_text(msg: types.Message, state: FSMContext):
@@ -341,3 +343,25 @@ async def process_wrong_answers(msg: types.Message, state: FSMContext):
             reply_markup=admin_kb.re_question  # <-- Возврат при общей ошибке
         )
         await state.clear()
+
+
+# Новый обработчик для выхода
+@router.callback_query(F.data == "exit_admin")
+async def exit_admin_handler(callback: CallbackQuery, state: FSMContext):
+    try:
+        # Удаляем сообщение с админ-панелью
+        await callback.message.delete()
+
+        # Отправляем новое сообщение с главным меню
+        await callback.message.answer(
+            "🔙 Вы вернулись в главное меню",
+            reply_markup=start_buttons  # Используем основную клавиатуру
+        )
+
+        # Очищаем состояние
+        await state.clear()
+        await callback.answer()
+
+    except Exception as e:
+        logging.error(f"Ошибка в exit_admin_handler: {e}")
+        await callback.answer("❌ Не удалось выйти из админ-панели")
