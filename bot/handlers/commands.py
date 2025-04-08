@@ -47,7 +47,9 @@ async def start_handler(msg: Message):
                     insert_players(connection, user_id)
             except Exception as e:
                 logging.error(f"Ошибка при работе с БД: {e}")
+                await msg.answer("❌ Ошибка инициализации профиля")
             finally:
+                cursor.close()
                 connection.close()
 
         await msg.answer(
@@ -55,7 +57,8 @@ async def start_handler(msg: Message):
             reply_markup=start_buttons
         )
     except Exception as e:
-        logging.error(f"Ошибка в start_handler: {e}")
+        logging.error(f"Критическая ошибка в start_handler: {e}")
+        await msg.answer("⚠️ Произошла системная ошибка. Попробуйте позже.")
 
 
 @router.message(F.text == "Моя статистика")

@@ -30,26 +30,21 @@ def create_connection():
 
 def insert_players(connection, user_id):
     try:
-        # Проверяем, существует ли уже пользователь с таким id
         cursor = connection.cursor()
         check_query = "SELECT * FROM players WHERE id = %s"
         cursor.execute(check_query, (user_id,))
         result = cursor.fetchone()
 
-        if result:
-            # Если пользователь уже существует, логируем это
-            logging.info(f"Пользователь с id {user_id} уже существует в базе данных.")
-        else:
-            # Если пользователя нет, добавляем его
+        if not result:
             insert_query = """
                 INSERT INTO players (id, score, correct_answers, wrong_answers, wins)
-                VALUES (%s, %s, %s, %s, %s);
+                VALUES (%s, 0, 0, 0, 0);
             """
-            values = (user_id, 0, 0, 0, 0)  # Добавляем только необходимые значения
-
-            cursor.execute(insert_query, values)
+            cursor.execute(insert_query, (user_id,))
             connection.commit()
-            logging.info(f"Игрок с id {user_id} добавлен в таблицу")
-
+            logging.info(f"Игрок {user_id} добавлен в таблицу players")
     except Error as e:
-        logging.error(f"Ошибка при добавлении данных для пользователя с id {user_id}: {e}")
+        logging.error(f"Ошибка при добавлении игрока {user_id}: {e}")
+    finally:
+        if cursor:
+            cursor.close()

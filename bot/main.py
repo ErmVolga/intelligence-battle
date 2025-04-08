@@ -20,29 +20,31 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 
 
 async def main():
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(
-            parse_mode=ParseMode.HTML,
-        )
-    )
-
+    bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Включаем все роутеры
-    dp.include_router(commands_router)  # роутер команд
-    dp.include_router(admin_router)     # роутер для админ панели
-    dp.include_router(game_router)      # роутер для игры (комнаты)
+    # Добавляем роутеры
+    dp.include_router(commands_router)
+    dp.include_router(admin_router)
+    dp.include_router(game_router)
 
+    # Принудительная инициализация БД
     connection = create_connection()
     if connection:
-        create_table(connection)
-        logging.info("Таблица проверена и создана, если не существовала.")
+        try:
+            from database.init_db import create_table
+            create_table(connection)  # Явный вызов создания таблиц
+            logging.info("Таблицы БД успешно созданы")
+        except Exception as e:
+            logging.error(f"FATAL: Не удалось создать таблицы: {e}")
+            raise
+        finally:
+            connection.close()
     else:
-        logging.error("Не удалось установить соединение с базой данных!")
+        logging.error("Невозможно подключиться к БД. Проверьте .env и доступы")
 
     await bot.delete_webhook(drop_pending_updates=True)
-    await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
+    await dp.start_polling(bot)
 
 
 if __name__ == "__main__":

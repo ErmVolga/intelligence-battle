@@ -11,7 +11,12 @@ def create_table(connection):
     try:
         cursor = connection.cursor()
 
-        # Создаем таблицу вопросов (должна быть первой, так как на нее есть ссылки)
+        # Удаляем старые таблицы в правильном порядке зависимостей
+        cursor.execute("DROP TABLE IF EXISTS players;")
+        cursor.execute("DROP TABLE IF EXISTS rooms;")
+        cursor.execute("DROP TABLE IF EXISTS questions;")
+
+        # Создаем таблицу вопросов (первой, так как на нее нет внешних ключей)
         create_questions_table_query = """
         CREATE TABLE IF NOT EXISTS questions (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -30,9 +35,10 @@ def create_table(connection):
         );
         """
         cursor.execute(create_questions_table_query)
+        logging.info("Таблица 'questions' создана")
 
         # Создаем таблицу комнат
-        create_table_rooms = """
+        create_rooms_table = """
         CREATE TABLE IF NOT EXISTS rooms (
             id INT AUTO_INCREMENT PRIMARY KEY,
             player1_id BIGINT DEFAULT NULL,
@@ -41,14 +47,16 @@ def create_table(connection):
             player4_id BIGINT DEFAULT NULL,
             question_id INT NOT NULL,
             is_private BOOLEAN DEFAULT FALSE,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  # Уже есть
-            start_timer_time TIMESTAMP DEFAULT NULL  # Добавляем новое поле
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            start_timer_time TIMESTAMP DEFAULT NULL,
+            FOREIGN KEY (question_id) REFERENCES questions(id) ON DELETE CASCADE
         );
         """
-        cursor.execute(create_table_rooms)
+        cursor.execute(create_rooms_table)
+        logging.info("Таблица 'rooms' создана")
 
         # Создаем таблицу игроков
-        create_table_query = """
+        create_players_table = """
         CREATE TABLE IF NOT EXISTS players (
             id BIGINT PRIMARY KEY,
             score INT DEFAULT 0,
@@ -60,12 +68,12 @@ def create_table(connection):
             FOREIGN KEY (current_room_id) REFERENCES rooms(id) ON DELETE SET NULL
         );
         """
-        cursor.execute(create_table_query)
+        cursor.execute(create_players_table)
+        logging.info("Таблица 'players' создана")
 
         connection.commit()
-        logging.info("Таблицы 'questions', 'rooms' и 'players' созданы успешно")
 
-        # Добавляем тестовые данные, если таблицы пустые
+        # Добавляем тестовые данные
         cursor.execute("SELECT COUNT(*) FROM questions")
         if cursor.fetchone()[0] == 0:
             test_questions = [
@@ -77,9 +85,11 @@ def create_table(connection):
                 test_questions
             )
             connection.commit()
-            logging.info("Добавлены тестовые вопросы")
+            logging.info("Тестовые вопросы добавлены")
 
     except Error as e:
         logging.error(f"Ошибка создания таблиц: {e}")
         connection.rollback()
         raise
+    finally:
+        cursor.close()

@@ -50,9 +50,13 @@ async def is_user_in_room(user_id: int) -> bool:
     if connection:
         try:
             cursor = connection.cursor()
-            cursor.execute("SELECT current_room_id FROM players WHERE id = %s", (user_id,))
+            # Явная проверка на NULL и числовые значения
+            cursor.execute(
+                "SELECT current_room_id FROM players WHERE id = %s AND current_room_id IS NOT NULL",
+                (user_id,)
+            )
             result = cursor.fetchone()
-            return result[0] is not None if result else False
+            return result is not None
         except Exception as e:
             logging.error(f"Ошибка проверки нахождения в комнате: {e}")
             return False
@@ -63,6 +67,8 @@ async def is_user_in_room(user_id: int) -> bool:
 
 async def add_player_to_room(user_id: int, room_id: int) -> bool:
     """Добавляет игрока в комнату"""
+    if await is_user_in_room(user_id):
+        return False
     connection = create_connection()
     if connection:
         try:
@@ -346,12 +352,18 @@ async def start_game_handler(msg: Message):
 async def play_with_friends_handler(callback: CallbackQuery, state: FSMContext):
     """Обработчик кнопки 'Играть с друзьями'"""
     try:
+        user_id = callback.from_user.id
+
+        if await is_user_in_room(user_id):
+            await callback.answer("⚠️ Вы уже в другой комнате!", show_alert=True)
+            return
         await callback.message.answer(
             "Выберите действие:",
             reply_markup=game_kb.friends_action_keyboard
         )
         await state.set_state(GameStates.waiting_for_friends_action)
         await callback.answer()
+
     except Exception as e:
         logging.error(f"Ошибка в play_with_friends_handler: {e}")
 
@@ -363,6 +375,10 @@ async def play_with_friends_handler(callback: CallbackQuery, state: FSMContext):
 async def handle_friends_action(callback: CallbackQuery, state: FSMContext):
     try:
         user_id = callback.from_user.id
+
+        if await is_user_in_room(user_id):
+            await callback.answer("⚠️ Вы уже в другой комнате!", show_alert=True)
+            return
 
         if callback.data == "create_room":
             # Создаем комнату
@@ -479,52 +495,50 @@ async def join_room_by_id_handler(callback: CallbackQuery, state: FSMContext):
 
 
 @router.callback_query(F.data == "play_random")
-async def play_random_handler(callback: CallbackQuery, state: FSMContext):
-    """Обработчик кнопки 'Случайные соперники'"""
-    try:
-        user_id = callback.from_user.id
+async def add_player_to_room(user_id: int, room_id: int) -> bool:
+    """Добавляет игрока в комнату"""
+    connection = create_connection()
+    if connection:
+        try:
+            cursor = connection.cursor()
 
-        if await is_user_in_room(user_id):
-            await callback.answer("⚠️ Вы уже в другой комнате!", show_alert=True)
-            return
+            # Обновляем players ДО rooms
+            cursor.execute(
+                "UPDATE players SET current_room_id = %s WHERE id = %s",
+                (room_id, user_id)
+            )
 
-        # Создаем или находим публичную комнату
-        room_id = await find_or_create_public_room(user_id)
-        if not await add_player_to_room(user_id, room_id):
-            raise Exception("Не удалось добавить игрока в комнату")
+            # Обновляем rooms
+            cursor.execute("""
+                UPDATE rooms SET
+                    player1_id = COALESCE(player1_id, %s),
+                    player2_id = CASE WHEN player1_id IS NOT NULL AND player2_id IS NULL THEN %s ELSE player2_id END,
+                    player3_id = CASE WHEN player2_id IS NOT NULL AND player3_id IS NULL THEN %s ELSE player3_id END,
+                    player4_id = CASE WHEN player3_id IS NOT NULL AND player4_id IS NULL THEN %s ELSE player4_id END
+                WHERE id = %s
+            """, (user_id, user_id, user_id, user_id, room_id))
 
-        msg = await callback.message.answer(
-            "🔎 Ищем случайных соперников...",
-            reply_markup=game_kb.get_room_status_keyboard(room_id, 1)
-        )
-
-        # Запускаем фоновую задачу с таймерами
-        stop_event = asyncio.Event()
-        task = asyncio.create_task(update_room_status_periodically(msg, room_id, stop_event))
-
-        await state.update_data({
-            'room_id': room_id,
-            'stop_event': stop_event,
-            'status_message_id': msg.message_id,
-            'background_task': task
-        })
-
-        await callback.answer()
-
-    except Exception as e:
-        logging.error(f"Ошибка в play_random_handler: {e}")
-        await callback.answer("❌ Не удалось найти игру")
+            connection.commit()
+            return True
+        except Exception as e:
+            logging.error(f"Ошибка добавления игрока: {str(e)}")
+            connection.rollback()
+            return False
+        finally:
+            connection.close()
+    return False
 
 
 @router.message(GameStates.waiting_for_room_id)
 async def process_room_id(msg: Message, state: FSMContext):
-    """Обработчик присоединения по ID"""
     try:
         user_id = msg.from_user.id
         room_id = int(msg.text.strip())
 
+        # Усиленная проверка
         if await is_user_in_room(user_id):
             await msg.answer("❌ Вы уже в другой комнате!")
+            await state.clear()
             return
 
         connection = create_connection()
