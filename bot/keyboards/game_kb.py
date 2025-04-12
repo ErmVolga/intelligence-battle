@@ -1,3 +1,4 @@
+import logging
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -36,6 +37,7 @@ back_to_main_keyboard = InlineKeyboardMarkup(
     ]
 )
 
+
 def get_room_status_keyboard(room_id: int, players_count: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -53,6 +55,7 @@ def get_room_status_keyboard(room_id: int, players_count: int) -> InlineKeyboard
             ]
         ]
     )
+
 
 back_to_main_inline_keyboard = InlineKeyboardMarkup(
     inline_keyboard=[
@@ -73,21 +76,26 @@ friends_action_keyboard = InlineKeyboardMarkup(
     ]
 )
 
+
 # Обновленная клавиатура статуса комнаты с таймером
 def get_room_status_keyboard(room_id: int, players_count: int) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(
-                    text=f"🔄 Игроков: {players_count}/4",
-                    callback_data="refresh_room_status"
-                )
-            ],
-            [
-                InlineKeyboardButton(
-                    text="🚪 Выйти",
-                    callback_data=f"leave_room:{room_id}"
-                )
+    try:
+        return InlineKeyboardMarkup(
+            inline_keyboard=[
+                [
+                    InlineKeyboardButton(
+                        text=f"🔄 Игроков: {players_count}/4",
+                        callback_data="refresh_room_status"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🚪 Выйти",
+                        callback_data=f"leave_room:{room_id}"
+                    )
+                ]
             ]
-        ]
-    )
+        )
+    except Exception as e:
+        logging.error(f"Ошибка создания клавиатуры: {e}")
+        return InlineKeyboardMarkup(inline_keyboard=[])  # Пустая клавиатура

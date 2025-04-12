@@ -77,13 +77,13 @@ async def add_player_to_room(user_id: int, room_id: int) -> bool:
     try:
         cursor = connection.cursor()
 
-        # 1. Обновляем запись игрока
+        # Обновляем запись игрока
         cursor.execute(
             "UPDATE players SET current_room_id = %s WHERE id = %s",
             (room_id, user_id)
         )
 
-        # 2. Находим первый пустой слот в комнате
+        # Находим первый пустой слот в комнате
         cursor.execute("""
             SELECT 
                 player1_id, 
@@ -92,31 +92,25 @@ async def add_player_to_room(user_id: int, room_id: int) -> bool:
                 player4_id 
             FROM rooms 
             WHERE id = %s
-            FOR UPDATE  # Блокируем запись для конкурентного доступа
+            FOR UPDATE
         """, (room_id,))
         players = cursor.fetchone()
 
         update_query = None
         params = ()
 
-        if players[0] is None:
-            update_query = "UPDATE rooms SET player1_id = %s WHERE id = %s"
-            params = (user_id, room_id)
-        elif players[1] is None:
-            update_query = "UPDATE rooms SET player2_id = %s WHERE id = %s"
-            params = (user_id, room_id)
-        elif players[2] is None:
-            update_query = "UPDATE rooms SET player3_id = %s WHERE id = %s"
-            params = (user_id, room_id)
-        elif players[3] is None:
-            update_query = "UPDATE rooms SET player4_id = %s WHERE id = %s"
-            params = (user_id, room_id)
+        # Проверяем слоты и обновляем первый пустой
+        for i in range(4):
+            if players[i] is None:
+                column_name = f"player{i + 1}_id"
+                update_query = f"UPDATE rooms SET {column_name} = %s WHERE id = %s"
+                params = (user_id, room_id)
+                break
 
         if not update_query:
             logging.error(f"Нет свободных слотов в комнате {room_id}")
             return False
 
-        # 3. Выполняем обновление
         cursor.execute(update_query, params)
         connection.commit()
         return True
@@ -126,8 +120,7 @@ async def add_player_to_room(user_id: int, room_id: int) -> bool:
         connection.rollback()
         return False
     finally:
-        if connection:
-            connection.close()
+        connection.close()
 
 
 async def remove_player_from_room(user_id: int) -> bool:
@@ -282,16 +275,17 @@ async def find_or_create_public_room(user_id: int) -> int:
         try:
             cursor = connection.cursor()
 
-            # Ищем комнату с доступными слотами
+            # Исправленный SQL-запрос (добавлена закрывающая скобка)
             cursor.execute("""
                 SELECT r.id 
                 FROM rooms r
                 WHERE r.is_private = FALSE 
                 AND (
-                    SELECT COUNT(*) 
-                    FROM players p 
-                    WHERE p.current_room_id = r.id
-                ) < 4
+                    r.player1_id IS NULL OR
+                    r.player2_id IS NULL OR
+                    r.player3_id IS NULL OR
+                    r.player4_id IS NULL
+                )  # <-- Закрывающая скобка добавлена
                 LIMIT 1
             """)
             room = cursor.fetchone()
@@ -310,43 +304,45 @@ async def find_or_create_public_room(user_id: int) -> int:
 
 # Модифицированная фоновая задача с таймерами
 async def update_room_status_periodically(message: Message, room_id: int, stop_event: asyncio.Event):
-    start_time = asyncio.get_event_loop().time()  # Время создания комнаты
-    min_players_timer_started = False  # Флаг для 90-секундного таймера
-    min_players_start_time = None  # Время старта 90-секундного таймера
+    try:
+        start_time = asyncio.get_event_loop().time()  # Время создания комнаты
+        min_players_timer_started = False  # Флаг для 90-секундного таймера
+        min_players_start_time = None  # Время старта 90-секундного таймера
+        while not stop_event.is_set():
+            current_time = asyncio.get_event_loop().time()
+            players_count = await get_room_players_count(room_id)
 
-    while not stop_event.is_set():
-        current_time = asyncio.get_event_loop().time()
-        players_count = await get_room_players_count(room_id)
-
-        # Таймер 60 секунд с момента создания комнаты (даже если игроков < 2)
-        if current_time - start_time > 60 and players_count < 2:
-            await message.edit_text("⌛ Время ожидания истекло. Игра начинается!")
-            await start_game_automatically(room_id)
-            stop_event.set()
-            break
-
-        # Таймер 90 секунд после набора 2 игроков
-        if players_count >= 2:
-            if not min_players_timer_started:
-                min_players_start_time = current_time
-                min_players_timer_started = True
-                await message.edit_text("✅ Набрано 2 игрока! Ожидаем до 90 секунд...")
-
-            if current_time - min_players_start_time > 90:
+            # Таймер 60 секунд с момента создания комнаты (даже если игроков < 2)
+            if current_time - start_time > 60 and players_count < 2:
                 await message.edit_text("⌛ Время ожидания истекло. Игра начинается!")
                 await start_game_automatically(room_id)
                 stop_event.set()
                 break
 
-        # Обновляем клавиатуру каждую секунду
-        try:
-            await message.edit_reply_markup(
-                reply_markup=game_kb.get_room_status_keyboard(room_id, players_count)
-            )
-        except:
-            pass  # Игнорируем ошибки редактирования сообщения
+            # Таймер 90 секунд после набора 2 игроков
+            if players_count >= 2:
+                if not min_players_timer_started:
+                    min_players_start_time = current_time
+                    min_players_timer_started = True
+                    await message.edit_text("✅ Набрано 2 игрока! Ожидаем до 90 секунд...")
 
-        await asyncio.sleep(1)
+                if current_time - min_players_start_time > 90:
+                    await message.edit_text("⌛ Время ожидания истекло. Игра начинается!")
+                    await start_game_automatically(room_id)
+                    stop_event.set()
+                    break
+
+            # Обновляем клавиатуру каждую секунду
+            try:
+                await message.edit_reply_markup(
+                    reply_markup=game_kb.get_room_status_keyboard(room_id, players_count)
+                )
+            except:
+                pass  # Игнорируем ошибки редактирования сообщения
+
+            await asyncio.sleep(1)
+    except Exception as e:
+        logging.error(f"Фоновая задача завершилась с ошибкой: {e}", exc_info=True)
 
 
 @router.message(F.text == "Начать игру")
@@ -511,31 +507,39 @@ async def join_room_by_id_handler(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "play_random")
 async def play_random_handler(callback: CallbackQuery, state: FSMContext):
-    """Обработчик кнопки 'Случайные соперники'"""
     user_id = callback.from_user.id
     try:
+        # Добавить логи
+        logging.info(f"Начало обработки play_random для пользователя {user_id}")
+
         if await is_user_in_room(user_id):
             await callback.answer("⚠️ Вы уже в другой комнате!", show_alert=True)
             return
 
         # Находим или создаем публичную комнату
+        logging.info(f"Поиск публичной комнаты для {user_id}")
         room_id = await find_or_create_public_room(user_id)
+        logging.info(f"Найдена/создана комната {room_id}")
 
         # Добавляем игрока в комнату
+        logging.info(f"Попытка добавить {user_id} в комнату {room_id}")
         success = await add_player_to_room(user_id, room_id)
         if not success:
-            raise Exception("Не удалось добавить игрока в комнату")
+            await callback.answer("❌ Не удалось присоединиться")
+            return
 
-        # Отправляем сообщение о присоединении
+        # Отправляем сообщение
+        logging.info(f"Отправка сообщения для {user_id}")
         msg = await callback.message.answer(
-            f"✅ Вы в комнате {room_id}",
+            f"✅ Вы в комнате {room_id}. Ожидаем игроков...",
             reply_markup=game_kb.get_room_status_keyboard(
                 room_id,
                 await get_room_players_count(room_id)
             )
         )
+        logging.info(f"Сообщение отправлено: ID {msg.message_id}")
 
-        # Запускаем фоновое обновление статуса комнаты
+        # Запуск фоновой задачи
         stop_event = asyncio.Event()
         task = asyncio.create_task(update_room_status_periodically(msg, room_id, stop_event))
         await state.update_data({
@@ -548,7 +552,7 @@ async def play_random_handler(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
 
     except Exception as e:
-        logging.error(f"Ошибка в play_random_handler: {e}")
+        logging.error(f"Ошибка в play_random_handler: {e}", exc_info=True)
         await callback.answer("❌ Не удалось присоединиться к комнате")
 
 
