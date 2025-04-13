@@ -10,11 +10,6 @@ def create_table(connection):
     try:
         cursor = connection.cursor()
 
-        # Удаляем старые таблицы
-        cursor.execute("DROP TABLE IF EXISTS players;")
-        cursor.execute("DROP TABLE IF EXISTS rooms;")
-        cursor.execute("DROP TABLE IF EXISTS questions;")
-
         # Создаем таблицу вопросов
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS questions (

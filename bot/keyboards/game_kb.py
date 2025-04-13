@@ -49,6 +49,10 @@ def get_room_status_keyboard(room_id: int, players_count: int) -> InlineKeyboard
             ],
             [
                 InlineKeyboardButton(
+                    text="🚀 Начать игру",
+                    callback_data="start_private_game"
+                ),
+                InlineKeyboardButton(
                     text="🚪 Выйти",
                     callback_data=f"leave_room:{room_id}"
                 )
@@ -78,24 +82,26 @@ friends_action_keyboard = InlineKeyboardMarkup(
 
 
 # Обновленная клавиатура статуса комнаты с таймером
-def get_room_status_keyboard(room_id: int, players_count: int) -> InlineKeyboardMarkup:
-    try:
-        return InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(
-                        text=f"🔄 Игроков: {players_count}/4",
-                        callback_data="refresh_room_status"
-                    )
-                ],
-                [
-                    InlineKeyboardButton(
-                        text="🚪 Выйти",
-                        callback_data=f"leave_room:{room_id}"
-                    )
-                ]
+def get_private_room_keyboard(room_id: int, players_count: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=f"👥 Игроков: {players_count}/4",
+                    callback_data="refresh_room_status"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚀 Начать игру",
+                    callback_data="start_private_game"
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🚪 Выйти",
+                    callback_data=f"leave_room:{room_id}"
+                )
             ]
-        )
-    except Exception as e:
-        logging.error(f"Ошибка создания клавиатуры: {e}")
-        return InlineKeyboardMarkup(inline_keyboard=[])  # Пустая клавиатура
+        ]
+    )

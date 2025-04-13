@@ -124,7 +124,6 @@ async def add_player_to_room(user_id: int, room_id: int) -> bool:
 
 
 async def remove_player_from_room(user_id: int) -> bool:
-    """Удаляет игрока из комнаты"""
     connection = create_connection()
     if connection:
         try:
@@ -135,13 +134,10 @@ async def remove_player_from_room(user_id: int) -> bool:
             result = cursor.fetchone()
             room_id = result[0] if result else None
 
-            # 2. Обновляем запись игрока
-            cursor.execute(
-                "UPDATE players SET current_room_id = NULL WHERE id = %s",
-                (user_id,)
-            )
+            # 2. Обнуляем current_room_id у игрока
+            cursor.execute("UPDATE players SET current_room_id = NULL WHERE id = %s", (user_id,))
 
-            # 3. Обновляем таблицу rooms (удаляем игрока оттуда)
+            # 3. Удаляем игрока из таблицы rooms
             if room_id:
                 cursor.execute("""
                     UPDATE rooms SET
@@ -152,8 +148,23 @@ async def remove_player_from_room(user_id: int) -> bool:
                     WHERE id = %s
                 """, (user_id, user_id, user_id, user_id, room_id))
 
+                # 🔥 Новый код — проверяем, пустая ли теперь комната
+                cursor.execute("""
+                    SELECT 
+                        (player1_id IS NOT NULL) + 
+                        (player2_id IS NOT NULL) + 
+                        (player3_id IS NOT NULL) + 
+                        (player4_id IS NOT NULL)
+                    FROM rooms WHERE id = %s
+                """, (room_id,))
+                count_result = cursor.fetchone()
+                if count_result and count_result[0] == 0:
+                    cursor.execute("DELETE FROM rooms WHERE id = %s", (room_id,))
+                    logging.info(f"[room {room_id}] Комната была пуста и удалена")
+
             connection.commit()
             return True
+
         except Exception as e:
             logging.error(f"Ошибка удаления игрока из комнаты: {e}")
             connection.rollback()
@@ -161,6 +172,7 @@ async def remove_player_from_room(user_id: int) -> bool:
         finally:
             connection.close()
     return False
+
 
 
 async def get_room_players_count(room_id: int) -> int:
@@ -189,8 +201,6 @@ async def get_room_players_count(room_id: int) -> int:
         finally:
             connection.close()
     return 0
-
-
 
 
 # Новая функция для автоматического старта игры
@@ -322,9 +332,24 @@ async def update_room_status_periodically(message: Message, room_id: int, stop_e
         min_players_start_time = None
 
         while not stop_event.is_set():
-            await asyncio.sleep(1)
+            # await asyncio.sleep(1)
 
             players_count = await get_room_players_count(room_id)
+
+            connection = create_connection()
+            if connection:
+                try:
+                    cursor = connection.cursor()
+                    cursor.execute("SELECT is_private FROM rooms WHERE id = %s", (room_id,))
+                    result = cursor.fetchone()
+                    if result and result[0]:
+                        logging.info(f"[room {room_id}] Приватная комната — таймер не запускается")
+                        stop_event.set()
+                        return
+                except Exception as e:
+                    logging.error(f"[room {room_id}] Ошибка получения is_private: {e}")
+                finally:
+                    connection.close()
 
             if players_count == 0:
                 logging.info(f"[room {room_id}] Нет игроков, удаляю комнату...")
@@ -577,7 +602,7 @@ async def play_random_handler(callback: CallbackQuery, state: FSMContext):
         # Отправляем сообщение
         logging.info(f"Отправка сообщения для {user_id}")
         msg = await callback.message.answer(
-            f"✅ Вы в комнате {room_id}. Ожидаем игроков...",
+            f"✅ Вы присоединились к игре! Ожидаем других игроков...",
             reply_markup=game_kb.get_room_status_keyboard(
                 room_id,
                 await get_room_players_count(room_id)
