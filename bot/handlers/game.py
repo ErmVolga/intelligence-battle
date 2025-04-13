@@ -164,20 +164,33 @@ async def remove_player_from_room(user_id: int) -> bool:
 
 
 async def get_room_players_count(room_id: int) -> int:
-    """Возвращает количество игроков в комнате"""
     connection = create_connection()
     if connection:
         try:
             cursor = connection.cursor()
-            cursor.execute("SELECT COUNT(*) FROM players WHERE current_room_id = %s", (room_id,))
+            cursor.execute("""
+                SELECT 
+                    (player1_id IS NOT NULL) + 
+                    (player2_id IS NOT NULL) + 
+                    (player3_id IS NOT NULL) + 
+                    (player4_id IS NOT NULL)
+                FROM rooms
+                WHERE id = %s
+            """, (room_id,))
             result = cursor.fetchone()
-            return result[0] if result else 0
+            if result is None:
+                logging.warning(f"[room {room_id}] Комната не найдена.")
+                return 0
+            count = result[0]
+            logging.info(f"[room {room_id}] В комнате {count} игроков")
+            return count
         except Exception as e:
-            logging.error(f"Ошибка получения количества игроков: {e}")
-            return 0
+            logging.error(f"[room {room_id}] Ошибка при подсчёте игроков: {e}")
         finally:
             connection.close()
     return 0
+
+
 
 
 # Новая функция для автоматического старта игры
@@ -234,37 +247,35 @@ async def get_room_players(room_id: int) -> list[int]:
 
 
 async def create_room(user_id: int, is_private: bool) -> int:
-    """Создает новую комнату"""
+    """Создает новую комнату (без установки current_room_id у игрока)"""
     connection = create_connection()
     if connection:
         try:
             cursor = connection.cursor()
 
-            # 1. Получаем случайный вопрос
+            # Получаем случайный вопрос
             cursor.execute("SELECT id FROM questions ORDER BY RAND() LIMIT 1")
             question_id = cursor.fetchone()[0]
 
-            # 2. Создаем комнату
+            # Создаем комнату (без назначения игрока в player1_id!)
             cursor.execute(
-                "INSERT INTO rooms (player1_id, question_id, is_private) VALUES (%s, %s, %s)",
-                (user_id, question_id, is_private)
+                "INSERT INTO rooms (question_id, is_private) VALUES (%s, %s)",
+                (question_id, is_private)
             )
             room_id = cursor.lastrowid
 
-            # 3. Обновляем запись игрока
-            cursor.execute(
-                "UPDATE players SET current_room_id = %s WHERE id = %s",
-                (room_id, user_id)
-            )
-
             connection.commit()
             return int(room_id)
+
         except Exception as e:
             logging.error(f"Ошибка создания комнаты: {e}")
             connection.rollback()
             raise Exception("Не удалось создать комнату")
+
         finally:
+            cursor.close()
             connection.close()
+
     raise Exception("Не удалось подключиться к базе данных")
 
 
@@ -305,44 +316,79 @@ async def find_or_create_public_room(user_id: int) -> int:
 # Модифицированная фоновая задача с таймерами
 async def update_room_status_periodically(message: Message, room_id: int, stop_event: asyncio.Event):
     try:
-        start_time = asyncio.get_event_loop().time()  # Время создания комнаты
-        min_players_timer_started = False  # Флаг для 90-секундного таймера
-        min_players_start_time = None  # Время старта 90-секундного таймера
+        countdown_total = 90  # Общее время таймера (сек)
+        countdown_remaining = countdown_total
+        min_players_timer_started = False
+        min_players_start_time = None
+
         while not stop_event.is_set():
-            current_time = asyncio.get_event_loop().time()
+            await asyncio.sleep(1)
+
             players_count = await get_room_players_count(room_id)
 
-            # Таймер 60 секунд с момента создания комнаты (даже если игроков < 2)
-            if current_time - start_time > 60 and players_count < 2:
-                await message.edit_text("⌛ Время ожидания истекло. Игра начинается!")
-                await start_game_automatically(room_id)
+            if players_count == 0:
+                logging.info(f"[room {room_id}] Нет игроков, удаляю комнату...")
+                connection = create_connection()
+                if connection:
+                    try:
+                        cursor = connection.cursor()
+                        cursor.execute("DELETE FROM rooms WHERE id = %s", (room_id,))
+                        connection.commit()
+                        logging.info(f"[room {room_id}] Комната удалена")
+                    except Exception as e:
+                        logging.error(f"[room {room_id}] Ошибка при удалении: {e}")
+                    finally:
+                        connection.close()
                 stop_event.set()
                 break
 
-            # Таймер 90 секунд после набора 2 игроков
+            # Если игроков >= 2, запускаем или продолжаем таймер
             if players_count >= 2:
                 if not min_players_timer_started:
-                    min_players_start_time = current_time
                     min_players_timer_started = True
-                    await message.edit_text("✅ Набрано 2 игрока! Ожидаем до 90 секунд...")
+                    min_players_start_time = asyncio.get_event_loop().time()
+                    countdown_remaining = countdown_total  # Обновляем отсчёт
 
-                if current_time - min_players_start_time > 90:
+                else:
+                    elapsed = asyncio.get_event_loop().time() - min_players_start_time
+                    countdown_remaining = max(0, countdown_total - int(elapsed))
+
+                # Если таймер истёк — запускаем игру
+                if countdown_remaining == 0:
                     await message.edit_text("⌛ Время ожидания истекло. Игра начинается!")
                     await start_game_automatically(room_id)
                     stop_event.set()
                     break
 
-            # Обновляем клавиатуру каждую секунду
-            try:
-                await message.edit_reply_markup(
-                    reply_markup=game_kb.get_room_status_keyboard(room_id, players_count)
-                )
-            except:
-                pass  # Игнорируем ошибки редактирования сообщения
+                try:
+                    await message.edit_text(
+                        f"⏳ Игроков: {players_count}/4\n"
+                        f"⌛ Игра начнётся через: {countdown_remaining} сек",
+                        reply_markup=game_kb.get_room_status_keyboard(room_id, players_count)
+                    )
+                except:
+                    pass
+
+            # Если игроков стало меньше 2 — сбрасываем таймер
+            else:
+                if min_players_timer_started:
+                    logging.info(f"В комнате {room_id} осталось <2 игроков — таймер сброшен")
+                    min_players_timer_started = False
+                    min_players_start_time = None
+                    countdown_remaining = countdown_total
+
+                try:
+                    await message.edit_text(
+                        f"🕐 Ожидаем игроков... ({players_count}/4)",
+                        reply_markup=game_kb.get_room_status_keyboard(room_id, players_count)
+                    )
+                except:
+                    pass
 
             await asyncio.sleep(1)
+
     except Exception as e:
-        logging.error(f"Фоновая задача завершилась с ошибкой: {e}", exc_info=True)
+        logging.error(f"Фоновая задача комнаты {room_id} завершилась с ошибкой: {e}", exc_info=True)
 
 
 @router.message(F.text == "Начать игру")
