@@ -6,6 +6,7 @@ from bot.utils.logging_config import setup_logging
 setup_logging()
 load_dotenv()
 
+
 def create_table(connection):
     try:
         cursor = connection.cursor()
@@ -60,6 +61,36 @@ def create_table(connection):
             );
         """)
         logging.info("Таблица 'players' создана без FOREIGN KEY")
+
+        # Создаем таблицу игровых сессий
+        create_game_sessions_table = """
+        CREATE TABLE IF NOT EXISTS game_sessions (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            room_id INT NOT NULL,
+            round_number INT DEFAULT 1,
+            current_question_id INT DEFAULT NULL,
+            status ENUM('waiting', 'active', 'finished') DEFAULT 'waiting',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+        """
+        cursor.execute(create_game_sessions_table)
+        logging.info("Таблица 'game_sessions' создана")
+
+        # Таблица участников внутри игры
+        create_game_players_table = """
+        CREATE TABLE IF NOT EXISTS game_players (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            room_id INT NOT NULL,
+            user_id BIGINT NOT NULL,
+            score INT DEFAULT 0,
+            is_active BOOLEAN DEFAULT TRUE,
+            is_banked BOOLEAN DEFAULT FALSE,
+            last_answer_correct BOOLEAN DEFAULT NULL,
+            answered_this_round BOOLEAN DEFAULT FALSE
+        );
+        """
+        cursor.execute(create_game_players_table)
+        logging.info("Таблица 'game_players' создана")
 
         # Добавляем тестовые вопросы
         cursor.execute("SELECT COUNT(*) FROM questions")
