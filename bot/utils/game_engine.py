@@ -4,6 +4,7 @@ import logging
 from bot.utils.db import create_connection
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
+
 class GameEngine:
     def __init__(self, room_id: int, bot):
         self.room_id = room_id
@@ -49,9 +50,9 @@ class GameEngine:
         text = f"Вопрос\n\n{self.current_question['question']}"
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text=txt, callback_data=f"answer:{txt}")]
-                for txt in self.answer_mapping.keys()
-            ] + [[InlineKeyboardButton(text="💰 Банк", callback_data="bank")]]
+                                [InlineKeyboardButton(text=txt, callback_data=f"answer:{txt}")]
+                                for txt in self.answer_mapping.keys()
+                            ] + [[InlineKeyboardButton(text="💰 Банк", callback_data="bank")]]
         )
         msg = await self.bot.send_message(user_id, text, reply_markup=keyboard)
         self.message_ids[user_id] = msg.message_id
@@ -103,3 +104,162 @@ class GameEngine:
         all_answers = [question_data["correct"]] + question_data["wrong"]
         random.shuffle(all_answers)
         return {ans: (ans == question_data["correct"]) for ans in all_answers}
+
+    async def finalize_round(self, room_id: int):
+        room = self.rooms.get(room_id)
+        if not room:
+            return
+
+        # Получение правильного ответа
+        correct_answer = room.current_question["correct_answer"]
+
+        # Подсвечиваем правильный ответ
+        await self.highlight_correct_answer(room, correct_answer)
+
+        # Удаляем всех, кто не ответил (по таймеру)
+        for user_id in room.players:
+            if user_id not in room.current_answers and user_id not in room.banked_users:
+                room.scores[user_id] = room.scores.get(user_id, 0)
+
+        # Отмечаем игроков, кто правильно ответил
+        correct_players = []
+        for user_id, ans in room.current_answers.items():
+            if ans == correct_answer:
+                correct_players.append(user_id)
+                room.scores[user_id] += 100
+
+        # Фиксируем, кто выбывает
+        eliminated_players = self.get_players_to_eliminate(room, correct_players)
+
+        for user_id in eliminated_players:
+            await self.send_message(user_id, "Вы выбыли из игры.")
+            del room.players[user_id]
+            room.eliminated_users.add(user_id)
+
+        # Обрабатываем банк
+        for user_id in room.banked_users:
+            await self.send_message(user_id, f"Вы забрали свои очки: {room.scores[user_id]}")
+            del room.players[user_id]
+
+        room.banked_users.clear()
+        room.current_answers.clear()
+        room.current_question = None
+        room.round_number += 1
+
+        await asyncio.sleep(3)  # Небольшая пауза перед следующим раундом
+
+        await self.check_game_status(room)
+
+    def get_players_to_eliminate(self, room, correct_players):
+        if len(correct_players) == len(room.players):
+            # Никто не выбыл, все ответили правильно
+            return []
+
+        # Найдём минимальный счёт
+        min_score = min([room.scores[uid] for uid in room.players if uid not in room.banked_users])
+        lowest_players = [uid for uid in room.players if room.scores[uid] == min_score]
+
+        # Если хотя бы один из них НЕ ответил правильно — он выбывает
+        for uid in lowest_players:
+            if uid not in correct_players:
+                return [uid]
+
+        return []
+
+    async def highlight_correct_answer(self, room, correct_answer):
+        # TODO: При желании: подсветить правильную кнопку (это зависит от реализации UI)
+        pass
+
+    async def check_game_status(self, room):
+        if len(room.players) == 0:
+            await self.notify_room(room, "Игра завершена! Никто не остался.")
+            del self.rooms[room.room_id]
+            return
+
+        if len(room.players) == 1:
+            lone_player = list(room.players.keys())[0]
+            await self.send_message(lone_player,
+                                    "Вы остались одни. Игра продолжится до ошибки или пока не нажмёте 'Банк'.")
+            await self.start_round(room.room_id)
+            return
+
+        await self.start_round(room.room_id)
+
+    async def finalize_round(self, room_id: int):
+        room = self.rooms.get(room_id)
+        if not room:
+            return
+
+        # Получение правильного ответа
+        correct_answer = room.current_question["correct_answer"]
+
+        # Подсвечиваем правильный ответ
+        await self.highlight_correct_answer(room, correct_answer)
+
+        # Удаляем всех, кто не ответил (по таймеру)
+        for user_id in room.players:
+            if user_id not in room.current_answers and user_id not in room.banked_users:
+                room.scores[user_id] = room.scores.get(user_id, 0)
+
+        # Отмечаем игроков, кто правильно ответил
+        correct_players = []
+        for user_id, ans in room.current_answers.items():
+            if ans == correct_answer:
+                correct_players.append(user_id)
+                room.scores[user_id] += 100
+
+        # Фиксируем, кто выбывает
+        eliminated_players = self.get_players_to_eliminate(room, correct_players)
+
+        for user_id in eliminated_players:
+            await self.send_message(user_id, "Вы выбыли из игры.")
+            del room.players[user_id]
+            room.eliminated_users.add(user_id)
+
+        # Обрабатываем банк
+        for user_id in room.banked_users:
+            await self.send_message(user_id, f"Вы забрали свои очки: {room.scores[user_id]}")
+            del room.players[user_id]
+
+        room.banked_users.clear()
+        room.current_answers.clear()
+        room.current_question = None
+        room.round_number += 1
+
+        await asyncio.sleep(3)  # Небольшая пауза перед следующим раундом
+
+        await self.check_game_status(room)
+
+    def get_players_to_eliminate(self, room, correct_players):
+        if len(correct_players) == len(room.players):
+            # Никто не выбыл, все ответили правильно
+            return []
+
+        # Найдём минимальный счёт
+        min_score = min([room.scores[uid] for uid in room.players if uid not in room.banked_users])
+        lowest_players = [uid for uid in room.players if room.scores[uid] == min_score]
+
+        # Если хотя бы один из них НЕ ответил правильно — он выбывает
+        for uid in lowest_players:
+            if uid not in correct_players:
+                return [uid]
+
+        return []
+
+    async def highlight_correct_answer(self, room, correct_answer):
+        #При желании: подсветить правильную кнопку (это зависит от реализации UI)
+        pass
+
+    async def check_game_status(self, room):
+        if len(room.players) == 0:
+            await self.notify_room(room, "Игра завершена! Никто не остался.")
+            del self.rooms[room.room_id]
+            return
+
+        if len(room.players) == 1:
+            lone_player = list(room.players.keys())[0]
+            await self.send_message(lone_player, "Вы остались одни. Игра продолжится до ошибки или пока не нажмёте 'Банк'.")
+            await self.start_round(room.room_id)
+            return
+
+        await self.start_round(room.room_id)
