@@ -27,6 +27,7 @@ async def main():
     dp.include_router(commands_router)
     dp.include_router(admin_router)
     dp.include_router(game_router)
+    dp.include_router(help_router)
 
     # Принудительная инициализация БД
     connection = create_connection()

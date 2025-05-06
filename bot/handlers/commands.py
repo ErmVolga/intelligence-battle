@@ -143,3 +143,4 @@ async def back_to_main_handler(msg: Message):
 async def message_handler(msg: Message):
     await msg.answer(f"Твой id: {msg.from_user.id}")
 '''
+
